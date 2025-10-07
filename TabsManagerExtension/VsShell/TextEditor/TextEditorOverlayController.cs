@@ -15,7 +15,6 @@ using Microsoft.VisualStudio.TextManager.Interop;
 using Microsoft.VisualStudio.ComponentModelHost;
 
 namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
-
     /// <summary>
     /// Отвечает за управление жизненным циклом визуального оверлея (`TextEditorOverlayControl`),
     /// который добавляется поверх текстового редактора через `AdornerOverlayManager`.

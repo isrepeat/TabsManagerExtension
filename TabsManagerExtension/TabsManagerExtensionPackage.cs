@@ -57,13 +57,12 @@ namespace TabsManagerExtension {
             //var initFlags = CppFeatures.Cx.InitFlags.DefaultFlags | CppFeatures.Cx.InitFlags.CreateInPackageFolder;
             //CppFeatures.Cx.Logger.Init(AppConstants.LogFilename, initFlags);
 
-            //Console.Beep(1000, 500); // 1000 Гц, 500 мс
-            Services.ExtensionServices.Initialize();
+            //Services.ExtensionServices.Initialize();
 
-            this.InitializeEvents();
+            //this.InitializeEvents();
 
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
-            await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
+            //await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
         }
 
 
