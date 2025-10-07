@@ -69,20 +69,21 @@ namespace TabsManagerExtension.ToolWindows {
 
 
         private async void Execute(object sender, EventArgs e) {
-            //VsixVisualTreeHelper.Instance.ToggleCustomTabs();
+            VsixVisualTreeHelper.Instance.ToggleCustomTabs();
+            
             //this.TestIncludeDependencyAnalyzer();
-            Helpers.Diagnostic.Logger.LogDebug($"Solution hierarchy:");
-            VsShell.Utils.VsHierarchyUtils.LogSolutionHierarchy();
-            Helpers.Diagnostic.Logger.LogDebug($"");
+            //Helpers.Diagnostic.Logger.LogDebug($"Solution hierarchy:");
+            //VsShell.Utils.VsHierarchyUtils.LogSolutionHierarchy();
+            //Helpers.Diagnostic.Logger.LogDebug($"");
 
-            var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
+            //var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
 
-            var projectEntry = solutionHierarchyAnalyzer.LoadedProjects[4];
+            //var projectEntry = solutionHierarchyAnalyzer.LoadedProjects[4];
 
-            var projectSourcesAnalyer = new VsShell.Project.ProjectSourcesAnalyzer(projectEntry.ProjectHierarchy.VsRealHierarchy);
-            projectSourcesAnalyer.Refresh();
+            //var projectSourcesAnalyer = new VsShell.Project.ProjectSourcesAnalyzer(projectEntry.ProjectHierarchy.VsRealHierarchy);
+            //projectSourcesAnalyer.Refresh();
 
-            int xx = 9;
+            //int xx = 9;
         }
 
 

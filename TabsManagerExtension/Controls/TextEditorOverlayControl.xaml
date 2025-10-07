@@ -19,25 +19,6 @@
                 <ResourceDictionary Source="/TabsManagerExtension;component/Styles/BrushResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
-            <!--<Style x:Key="CustomBorderStyle" TargetType="Border">
-                <Setter Property="Margin" Value="0,-2,0,0" />
-                <Setter Property="Focusable" Value="False"/>
-                <Setter Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
-                <Setter Property="BorderThickness" Value="0,2,0,0" />
-                <Setter Property="IsHitTestVisible" Value="False" />
-                <Setter Property="VerticalAlignment" Value="Stretch" />
-                <Setter Property="HorizontalAlignment" Value="Stretch" />
-                <Style.Triggers>
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding [TextEditor], Source={x:Static Helpers:FocusWatcher.FocusMetadata}}" Value="False" />
-                            <Condition Binding="{Binding [TabsManagerControl], Source={x:Static Helpers:FocusWatcher.FocusMetadata}}" Value="False" />
-                        </MultiDataTrigger.Conditions>
-                        <Setter Property="BorderBrush" Value="{StaticResource AppAccentNonActiveLowBrush}" />
-                    </MultiDataTrigger>
-                </Style.Triggers>
-            </Style>-->
-
             <Style x:Key="AnchorContainerStyle" TargetType="Grid">
                 <Setter Property="Width" Value="auto"/>
                 <Setter Property="Margin" Value="0,30,30,0"/>
