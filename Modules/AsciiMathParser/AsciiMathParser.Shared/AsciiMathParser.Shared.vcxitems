@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <MSBuildAllProjects Condition="'$(MSBuildVersion)' == '' Or '$(MSBuildVersion)' &lt; '16.0'">$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <ItemsProjectGuid>{53C4DCEF-A15F-4A8D-AA61-4D8D40A3FA97}</ItemsProjectGuid>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MSBuildThisFileDirectory)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectCapability Include="SourceItemsFromImports" />
+  </ItemGroup>
+  <!-- ================================ Custom targets ================================ -->
+  <Import Project="$(MSBuildThisFileDirectory)$(MSBuildThisFileName).targets" Condition="Exists('$(MSBuildThisFileDirectory)$(MSBuildThisFileName).targets')" />
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)$(MSBuildThisFileName).targets" Condition="Exists('$(MSBuildThisFileDirectory)$(MSBuildThisFileName).targets')" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)FractionAst.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)FractionBars.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(MSBuildThisFileDirectory)FractionAst.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)FractionBars.h" />
+  </ItemGroup>
+  <!-- ================================================================================ -->
+</Project>

@@ -58,6 +58,26 @@ Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "HelpersCs.Visual", "Utility
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TabsManagerExtension", "TabsManagerExtension\TabsManagerExtension.csproj", "{152F249B-DD89-43AA-9021-2AD93ACF4DDA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "!Solution", "!Solution", "{F29B75E3-D8D0-455E-9B61-2B2BA0490897}"
+	ProjectSection(SolutionItems) = preProject
+		AutoPrMerge.bat = AutoPrMerge.bat
+		DCT.CppCommon.targets = DCT.CppCommon.targets
+		Directory.Build.props = Directory.Build.props
+		Directory.Build.targets = Directory.Build.targets
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Modules", "Modules", "{B49F279B-CF1F-4395-881A-510FDB38A21E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "AsciiMathParser", "AsciiMathParser", "{0D45096E-5D52-486F-8877-0BBB22660D26}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AsciiMathParser.Desktop", "Modules\AsciiMathParser\AsciiMathParser.Desktop\AsciiMathParser.Desktop.vcxproj", "{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AsciiMathParser.Shared", "Modules\AsciiMathParser\AsciiMathParser.Shared\AsciiMathParser.Shared.vcxitems", "{53C4DCEF-A15F-4A8D-AA61-4D8D40A3FA97}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AsciiMathParser.CLR", "Modules\AsciiMathParser\AsciiMathParser.CLR\AsciiMathParser.CLR.vcxproj", "{519C8806-32C9-4E7D-B52B-573E4107724C}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AsciiMathParser.Static", "Modules\AsciiMathParser\AsciiMathParser.Static\AsciiMathParser.Static.vcxproj", "{3161F01D-5544-407C-9784-A1F444608246}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -152,6 +172,42 @@ Global
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Release|x64.Build.0 = Release|Any CPU
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Release|x86.ActiveCfg = Release|x86
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Release|x86.Build.0 = Release|x86
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Debug|Any CPU.Build.0 = Debug|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Debug|x64.ActiveCfg = Debug|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Debug|x64.Build.0 = Debug|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Debug|x86.ActiveCfg = Debug|Win32
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Debug|x86.Build.0 = Debug|Win32
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Release|Any CPU.ActiveCfg = Release|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Release|Any CPU.Build.0 = Release|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Release|x64.ActiveCfg = Release|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Release|x64.Build.0 = Release|x64
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Release|x86.ActiveCfg = Release|Win32
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935}.Release|x86.Build.0 = Release|Win32
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Debug|Any CPU.Build.0 = Debug|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Debug|x64.ActiveCfg = Debug|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Debug|x64.Build.0 = Debug|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Debug|x86.ActiveCfg = Debug|Win32
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Debug|x86.Build.0 = Debug|Win32
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Release|Any CPU.ActiveCfg = Release|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Release|Any CPU.Build.0 = Release|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Release|x64.ActiveCfg = Release|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Release|x64.Build.0 = Release|x64
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Release|x86.ActiveCfg = Release|Win32
+		{519C8806-32C9-4E7D-B52B-573E4107724C}.Release|x86.Build.0 = Release|Win32
+		{3161F01D-5544-407C-9784-A1F444608246}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Debug|Any CPU.Build.0 = Debug|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Debug|x64.ActiveCfg = Debug|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Debug|x64.Build.0 = Debug|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Debug|x86.ActiveCfg = Debug|Win32
+		{3161F01D-5544-407C-9784-A1F444608246}.Debug|x86.Build.0 = Debug|Win32
+		{3161F01D-5544-407C-9784-A1F444608246}.Release|Any CPU.ActiveCfg = Release|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Release|Any CPU.Build.0 = Release|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Release|x64.ActiveCfg = Release|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Release|x64.Build.0 = Release|x64
+		{3161F01D-5544-407C-9784-A1F444608246}.Release|x86.ActiveCfg = Release|Win32
+		{3161F01D-5544-407C-9784-A1F444608246}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -183,6 +239,11 @@ Global
 		{CD563DC0-5C5F-423C-B1CE-74B120659770} = {F1B4D38D-BA09-4048-A514-C94292450E70}
 		{5DC1B831-8A22-4C59-9D3F-B081E2F6AF36} = {F1B4D38D-BA09-4048-A514-C94292450E70}
 		{86AC5B14-7FBA-4D5B-B711-90E3F7798E0C} = {F1B4D38D-BA09-4048-A514-C94292450E70}
+		{0D45096E-5D52-486F-8877-0BBB22660D26} = {B49F279B-CF1F-4395-881A-510FDB38A21E}
+		{18B7FDEE-294A-4A6D-B499-63ACEAEF0935} = {0D45096E-5D52-486F-8877-0BBB22660D26}
+		{53C4DCEF-A15F-4A8D-AA61-4D8D40A3FA97} = {0D45096E-5D52-486F-8877-0BBB22660D26}
+		{519C8806-32C9-4E7D-B52B-573E4107724C} = {0D45096E-5D52-486F-8877-0BBB22660D26}
+		{3161F01D-5544-407C-9784-A1F444608246} = {0D45096E-5D52-486F-8877-0BBB22660D26}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {00000000-0000-0000-0000-000000000000}
@@ -194,6 +255,7 @@ Global
 		UtilityHelpersLib\HelpersCs\HelpersCs.Diagnostic\HelpersCs.Diagnostic.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
 		UtilityHelpersLib\HelpersCs\HelpersCs.Visual\HelpersCs.Visual.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
 		UtilityHelpersLib\HelpersCs\HelpersCs\HelpersCs.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
+		Modules\AsciiMathParser\AsciiMathParser.Shared\AsciiMathParser.Shared.vcxitems*{18b7fdee-294a-4a6d-b499-63aceaef0935}*SharedItemsImports = 4
 		UtilityHelpersLib\3rdParty\3rdParty_Packages_Includes\Boost.Includes\Boost.Includes.vcxitems*{298ab331-24aa-4f41-916e-2206023f8085}*SharedItemsImports = 4
 		UtilityHelpersLib\3rdParty\JsonParser\JsonParser.Shared\JsonParser.Shared.vcxitems*{298ab331-24aa-4f41-916e-2206023f8085}*SharedItemsImports = 4
 		UtilityHelpersLib\3rdParty\MagicEnum\MagicEnum.Shared\MagicEnum.Shared.vcxitems*{298ab331-24aa-4f41-916e-2206023f8085}*SharedItemsImports = 4
@@ -201,12 +263,14 @@ Global
 		UtilityHelpersLib\Helpers\ComAPI.Shared\ComAPI.Shared.vcxitems*{298ab331-24aa-4f41-916e-2206023f8085}*SharedItemsImports = 4
 		UtilityHelpersLib\Helpers\Helpers.Shared\Helpers.Shared.vcxitems*{298ab331-24aa-4f41-916e-2206023f8085}*SharedItemsImports = 4
 		UtilityHelpersLib\Helpers\Helpers.Includes\Helpers.Includes.vcxitems*{301bf8c8-f7ca-429f-8b12-ded615a64508}*SharedItemsImports = 9
+		Modules\AsciiMathParser\AsciiMathParser.Shared\AsciiMathParser.Shared.vcxitems*{3161f01d-5544-407c-9784-a1f444608246}*SharedItemsImports = 4
 		UtilityHelpersLib\3rdParty\Spdlog\Spdlog.Shared\Spdlog.Shared.vcxitems*{34a69ffa-7fae-4de7-bac0-30b5730831e9}*SharedItemsImports = 9
 		UtilityHelpersLib\3rdParty\MagicEnum\MagicEnum.Shared\MagicEnum.Shared.vcxitems*{4ab35171-9952-4a89-9589-8a63e8be47e9}*SharedItemsImports = 4
 		UtilityHelpersLib\3rdParty\Spdlog\Spdlog.Shared\Spdlog.Shared.vcxitems*{4ab35171-9952-4a89-9589-8a63e8be47e9}*SharedItemsImports = 4
 		UtilityHelpersLib\Helpers\Helpers.Includes\Helpers.Includes.vcxitems*{4ab35171-9952-4a89-9589-8a63e8be47e9}*SharedItemsImports = 4
 		UtilityHelpersLib\3rdParty\JsonParser\JsonParser.Shared\JsonParser.Shared.vcxitems*{4dc532ad-a19b-4ec5-9923-990df8f4a9ab}*SharedItemsImports = 4
 		UtilityHelpersLib\Helpers\Helpers.Includes\Helpers.Includes.vcxitems*{4dc532ad-a19b-4ec5-9923-990df8f4a9ab}*SharedItemsImports = 4
+		Modules\AsciiMathParser\AsciiMathParser.Shared\AsciiMathParser.Shared.vcxitems*{53c4dcef-a15f-4a8d-aa61-4d8d40a3fa97}*SharedItemsImports = 9
 		UtilityHelpersLib\HelpersCs\HelpersCs.Diagnostic\HelpersCs.Diagnostic.projitems*{5dc1b831-8a22-4c59-9d3f-b081e2f6af36}*SharedItemsImports = 13
 		UtilityHelpersLib\3rdParty\3rdParty_Packages_Includes\3rdParty.Includes\3rdParty.Includes.vcxitems*{63bb29a8-e9c3-4070-9e45-900fa2f2da8a}*SharedItemsImports = 9
 		UtilityHelpersLib\HelpersCs\HelpersCs.Visual\HelpersCs.Visual.projitems*{86ac5b14-7fba-4d5b-b711-90e3f7798e0c}*SharedItemsImports = 13
