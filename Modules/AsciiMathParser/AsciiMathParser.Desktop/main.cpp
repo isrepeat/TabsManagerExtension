@@ -92,12 +92,12 @@ int main() {
 	const std::string mathBlock = ExtractMathBlock(text);
 
 	// 1) Вырезать блок между маркерами можно отдельно; для demo кормим сразу весь текст.
-	MathAscii::AsciiGrid grid{
+	AsciiMathParser::Core::AsciiGrid grid{
 		mathBlock
 	};
 
 	// 2) Найдём все «бары»
-	MathAscii::FractionBars finder{
+	AsciiMathParser::Core::FractionBars finder{
 		grid
 	};
 
@@ -111,7 +111,7 @@ int main() {
 	}
 
 	// 3) Построим иерархию
-	MathAscii::BarTreeBuilder builder{
+	AsciiMathParser::Core::BarTreeBuilder builder{
 		grid
 	};
 

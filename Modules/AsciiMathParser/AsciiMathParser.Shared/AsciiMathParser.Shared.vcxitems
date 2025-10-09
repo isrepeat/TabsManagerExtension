@@ -18,13 +18,15 @@
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)$(MSBuildThisFileName).targets" Condition="Exists('$(MSBuildThisFileDirectory)$(MSBuildThisFileName).targets')" />
   </ItemGroup>
+  <!-- ================================================================================ -->
   <ItemGroup>
     <ClCompile Include="$(MSBuildThisFileDirectory)FractionAst.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)FractionBars.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)LogicalBoxParser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)FractionAst.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FractionBars.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)LogicalBoxParser.h" />
   </ItemGroup>
-  <!-- ================================================================================ -->
 </Project>

@@ -15,12 +15,18 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)FractionBars.cpp">
       <Filter>Sources</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)LogicalBoxParser.cpp">
+      <Filter>Sources</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)FractionAst.h">
       <Filter>Sources</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)FractionBars.h">
+      <Filter>Sources</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)LogicalBoxParser.h">
       <Filter>Sources</Filter>
     </ClInclude>
   </ItemGroup>

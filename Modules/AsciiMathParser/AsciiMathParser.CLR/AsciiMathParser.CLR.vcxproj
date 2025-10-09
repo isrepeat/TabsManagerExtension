@@ -125,6 +125,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\..\UtilityHelpersLib\Helpers\Helpers.Raw\Helpers.Raw.vcxproj">
+      <Project>{298ab331-24aa-4f41-916e-2206023f8085}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\AsciiMathParser.Static\AsciiMathParser.Static.vcxproj">
       <Project>{3161f01d-5544-407c-9784-a1f444608246}</Project>
     </ProjectReference>
