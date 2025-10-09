@@ -31,7 +31,6 @@
         %(PreprocessorDefinitions);
         MSBuildProject__RootNamespace=$(RootNamespace)
       </PreprocessorDefinitions>
-      <UseStandardPreprocessor>true</UseStandardPreprocessor>
     </ClCompile>
   </ItemDefinitionGroup>
   <!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
