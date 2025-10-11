@@ -20,13 +20,16 @@
   </ItemGroup>
   <!-- ================================================================================ -->
   <ItemGroup>
-    <ClCompile Include="$(MSBuildThisFileDirectory)FractionAst.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)FractionBars.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)LogicalBoxParser.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(MSBuildThisFileDirectory)FractionAst.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Detect\FractionBarDetector.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Detect\IFeatureDetector.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FractionBars.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\LayoutBuilder.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\LayoutGraph.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)LogicalBoxParser.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Geometry.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Grid.h" />
   </ItemGroup>
 </Project>
