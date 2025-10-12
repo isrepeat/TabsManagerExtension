@@ -1,7 +1,10 @@
 #pragma once
 #include "../Detect/IFeatureDetector.h"
-#include "../Layout/LayoutGraph.h"
 #include "../Model/Geometry.h"
+#include "RelationBuilderContext.h"
+#include "BarRelationBuilder.h"
+#include "LayoutGraph.h"
+
 #include <unordered_set>
 #include <vector>
 #include <memory>
@@ -150,142 +153,152 @@ namespace AsciiMathParser {
 					LayoutGraph& outGraph,
 					const Model::AsciiGrid& grid
 				) const {
-					const auto& nodesRef = outGraph.Nodes();
-					const std::size_t n = nodesRef.size();
+					RelationBuilderContext ctx{ outGraph, grid };
 
-					auto add_edge_once = [&](Layout::NodeId u, Layout::NodeId v, RelKind k) {
-						for (const auto& e : outGraph.Edges()) {
-							if (e.a == u && e.b == v && e.kind == k) {
-								return;
-							}
-						}
-						outGraph.AddEdge(u, v, k);
-						};
+					BarRelationBuilder barBuilder{ this->options.minRelativeXOverlap };
+					barBuilder.Wire(ctx);
 
-					// Соберём список баров для проверки «чистого коридора»
-					const auto barRegions = this->CollectBarRegions(outGraph);
+					// В будущем можно добавить:
+					// SqrtRelationBuilder sqrtBuilder{};
+					// sqrtBuilder.Wire(ctx);
 
-					for (std::size_t i = 0; i < n; ++i) {
-						const auto& bar = nodesRef[i];
-						if (bar.role != "bar") {
-							continue;
-						}
 
-						for (std::size_t j = 0; j < n; ++j) {
-							if (i == j) {
-								continue;
-							}
+					//const auto& nodesRef = outGraph.Nodes();
+					//const std::size_t n = nodesRef.size();
 
-							const auto& other = nodesRef[j];
-							if (other.role != "text-run" && other.role != "bar") {
-								continue;
-							}
+					//auto add_edge_once = [&](Layout::NodeId u, Layout::NodeId v, RelKind k) {
+					//	for (const auto& e : outGraph.Edges()) {
+					//		if (e.a == u && e.b == v && e.kind == k) {
+					//			return;
+					//		}
+					//	}
+					//	outGraph.AddEdge(u, v, k);
+					//	};
 
-							// Перекрытие по X должно быть достаточным
-							const int overlapX = bar.region.OverlapX(other.region);
-							const int baseBar = std::max(1, bar.region.Width());
-							const int baseOth = std::max(1, other.region.Width());
-							const double relBar = double(overlapX) / baseBar;
-							const double relOth = double(overlapX) / baseOth;
+					//// Соберём список баров для проверки «чистого коридора»
+					//const auto barRegions = this->CollectBarRegions(outGraph);
 
-							if (relBar < this->options.minRelativeXOverlap &&
-								relOth < this->options.minRelativeXOverlap) {
-								continue;
-							}
+					//for (std::size_t i = 0; i < n; ++i) {
+					//	const auto& bar = nodesRef[i];
+					//	if (bar.role != "bar") {
+					//		continue;
+					//	}
 
-							// Ориентация: (верх) --Above--> (низ)
-							if (other.region.rows.y2 < bar.region.rows.y1) {
-								// other над bar
-								const bool ok =
-									(other.role == "bar")
-									? true // bar→bar: разрешаем без коридора (вложенные дроби)
-									: this->HasClearVerticalCorridor(grid, other.region, bar.region, barRegions);
+					//	for (std::size_t j = 0; j < n; ++j) {
+					//		if (i == j) {
+					//			continue;
+					//		}
 
-								if (ok) {
-									add_edge_once(other.id, bar.id, RelKind::Above);
-								}
-							}
-							else if (bar.region.rows.y2 < other.region.rows.y1) {
-								// bar над other
-								const bool ok =
-									(other.role == "bar")
-									? true // bar→bar: разрешаем без коридора (вложенные дроби)
-									: this->HasClearVerticalCorridor(grid, bar.region, other.region, barRegions);
+					//		const auto& other = nodesRef[j];
+					//		if (other.role != "text-run" && other.role != "bar") {
+					//			continue;
+					//		}
 
-								if (ok) {
-									add_edge_once(bar.id, other.id, RelKind::Above);
-								}
-							}
-						}
-					}
+					//		// Перекрытие по X должно быть достаточным
+					//		const int overlapX = bar.region.OverlapX(other.region);
+					//		const int baseBar = std::max(1, bar.region.Width());
+					//		const int baseOth = std::max(1, other.region.Width());
+					//		const double relBar = double(overlapX) / baseBar;
+					//		const double relOth = double(overlapX) / baseOth;
+
+					//		if (relBar < this->options.minRelativeXOverlap &&
+					//			relOth < this->options.minRelativeXOverlap) {
+					//			continue;
+					//		}
+
+					//		// Ориентация: (верх) --Above--> (низ)
+					//		if (other.region.rows.y2 < bar.region.rows.y1) {
+					//			// other над bar
+					//			const bool ok =
+					//				(other.role == "bar")
+					//				? true // bar→bar: разрешаем без коридора (вложенные дроби)
+					//				: this->HasClearVerticalCorridor(grid, other.region, bar.region, barRegions);
+
+					//			if (ok) {
+					//				add_edge_once(other.id, bar.id, RelKind::Above);
+					//			}
+					//		}
+					//		else if (bar.region.rows.y2 < other.region.rows.y1) {
+					//			// bar над other
+					//			const bool ok =
+					//				(other.role == "bar")
+					//				? true // bar→bar: разрешаем без коридора (вложенные дроби)
+					//				: this->HasClearVerticalCorridor(grid, bar.region, other.region, barRegions);
+
+					//			if (ok) {
+					//				add_edge_once(bar.id, other.id, RelKind::Above);
+					//			}
+					//		}
+					//	}
+					//}
 				}
 
-				// Быстрый список всех bar-регионов (по узлам графа)
-				std::vector<Model::Region> CollectBarRegions(
-					const LayoutGraph& g
-				) const {
-					std::vector<Model::Region> bars{};
-					for (const auto& n : g.Nodes()) {
-						if (n.role == "bar") {
-							bars.push_back(n.region);
-						}
-					}
-					return bars;
-				}
+				//// Быстрый список всех bar-регионов (по узлам графа)
+				//std::vector<Model::Region> CollectBarRegions(
+				//	const LayoutGraph& g
+				//) const {
+				//	std::vector<Model::Region> bars{};
+				//	for (const auto& n : g.Nodes()) {
+				//		if (n.role == "bar") {
+				//			bars.push_back(n.region);
+				//		}
+				//	}
+				//	return bars;
+				//}
 
-				// Принадлежит ли клетка (y,x) какому-либо bar-региону
-				bool IsCellInAnyBar(
-					const std::vector<Model::Region>& bars,
-					const int y,
-					const int x
-				) const {
-					for (const auto& r : bars) {
-						if (r.rows.y1 <= y && y <= r.rows.y2) {
-							if (r.cols.x1 <= x && x <= r.cols.x2) {
-								return true;
-							}
-						}
-					}
-					return false;
-				}
+				//// Принадлежит ли клетка (y,x) какому-либо bar-региону
+				//bool IsCellInAnyBar(
+				//	const std::vector<Model::Region>& bars,
+				//	const int y,
+				//	const int x
+				//) const {
+				//	for (const auto& r : bars) {
+				//		if (r.rows.y1 <= y && y <= r.rows.y2) {
+				//			if (r.cols.x1 <= x && x <= r.cols.x2) {
+				//				return true;
+				//			}
+				//		}
+				//	}
+				//	return false;
+				//}
 
-				// «Чистый вертикальный коридор» для пары (верх → низ) по X-перекрытию.
-				// Разрешаем ' ' и '=' (если '=' принадлежит какому-то bar).
-				bool HasClearVerticalCorridor(
-					const Model::AsciiGrid& grid,
-					const Model::Region& upper,
-					const Model::Region& lower,
-					const std::vector<Model::Region>& bars
-				) const {
-					const int overlapX1 = std::max(upper.cols.x1, lower.cols.x1);
-					const int overlapX2 = std::min(upper.cols.x2, lower.cols.x2);
-					if (overlapX2 < overlapX1) {
-						return false; // нет реального перекрытия по X
-					}
+				//// «Чистый вертикальный коридор» для пары (верх → низ) по X-перекрытию.
+				//// Разрешаем ' ' и '=' (если '=' принадлежит какому-то bar).
+				//bool HasClearVerticalCorridor(
+				//	const Model::AsciiGrid& grid,
+				//	const Model::Region& upper,
+				//	const Model::Region& lower,
+				//	const std::vector<Model::Region>& bars
+				//) const {
+				//	const int overlapX1 = std::max(upper.cols.x1, lower.cols.x1);
+				//	const int overlapX2 = std::min(upper.cols.x2, lower.cols.x2);
+				//	if (overlapX2 < overlapX1) {
+				//		return false; // нет реального перекрытия по X
+				//	}
 
-					// Вплотную по Y — считаем коридор «чистым»
-					if (lower.rows.y1 - upper.rows.y2 <= 1) {
-						return true;
-					}
+				//	// Вплотную по Y — считаем коридор «чистым»
+				//	if (lower.rows.y1 - upper.rows.y2 <= 1) {
+				//		return true;
+				//	}
 
-					// Проверяем вертикальный коридор между верхним и нижним регионами.
-					// Сканируем только по тем колонкам (x), где области реально пересекаются.
-					for (int x = overlapX1; x <= overlapX2; ++x) {
-						for (int y = upper.rows.y2 + 1; y <= lower.rows.y1 - 1; ++y) {
-							const char c = grid.At(y, x);
-							if (c == ' ') {
-								continue;
-							}
-							if (c == '=') {
-								if (this->IsCellInAnyBar(bars, y, x)) {
-									continue; // '=' внутри любого bar — это допустимо
-								}
-							}
-							return false; // встретили «посторонний» символ → коридор «грязный»
-						}
-					}
-					return true;
-				}
+				//	// Проверяем вертикальный коридор между верхним и нижним регионами.
+				//	// Сканируем только по тем колонкам (x), где области реально пересекаются.
+				//	for (int x = overlapX1; x <= overlapX2; ++x) {
+				//		for (int y = upper.rows.y2 + 1; y <= lower.rows.y1 - 1; ++y) {
+				//			const char c = grid.At(y, x);
+				//			if (c == ' ') {
+				//				continue;
+				//			}
+				//			if (c == '=') {
+				//				if (this->IsCellInAnyBar(bars, y, x)) {
+				//					continue; // '=' внутри любого bar — это допустимо
+				//				}
+				//			}
+				//			return false; // встретили «посторонний» символ → коридор «грязный»
+				//		}
+				//	}
+				//	return true;
+				//}
 
 
 				// Проверяем, вся ли область состоит из '='.

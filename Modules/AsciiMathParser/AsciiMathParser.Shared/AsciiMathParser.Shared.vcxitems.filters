@@ -47,5 +47,11 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Detect\IFeatureDetector.h">
       <Filter>Sources\Detect</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\BarRelationBuilder.h">
+      <Filter>Sources\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\RelationBuilderContext.h">
+      <Filter>Sources\Layout</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
