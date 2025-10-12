@@ -5,7 +5,6 @@
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Detect {
-
 			//
 			// ░ FractionBarDetector
 			// ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
@@ -23,23 +22,20 @@ namespace AsciiMathParser {
 				explicit FractionBarDetector() = default;
 
 				// Основной метод интерфейса: возвращает все найденные фичи.
-				std::vector<FeatureRegion> Detect(
-					const Model::AsciiGrid& grid
-				) const override {
+				std::vector<FeatureRegion> Detect(const Model::AsciiGrid& grid) const override {
 					std::vector<FeatureRegion> out{};
 
 					// Проходим по всем строкам ASCII-сетки
-					for (int y = 0; y < grid.Height(); ++y) {
+					for (int y = 0; y < grid.Height(); ++y) {						
 						int x = 0;
-						while (x < grid.Width()) {
 
+						while (x < grid.Width()) {
 							// Нашли первый символ '='
 							if (this->IsHorizontalDash(grid.At(y, x))) {
 								const int xStart = x;
 
 								// Продлеваем, пока идёт сплошная линия '='
-								while ((x + 1) < grid.Width() &&
-									this->IsHorizontalDash(grid.At(y, x + 1))) {
+								while ((x + 1) < grid.Width() && this->IsHorizontalDash(grid.At(y, x + 1))) {
 									++x;
 								}
 								const int xEnd = x;

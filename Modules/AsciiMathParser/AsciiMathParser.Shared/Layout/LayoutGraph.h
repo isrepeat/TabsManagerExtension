@@ -11,8 +11,8 @@
 // LayoutGraph — это не «граф» в математическом смысле, а обобщённая структура,
 // описывающая пространственные отношения элементов формулы на ASCII-сетке.
 //
-// Вместо того чтобы работать с абсолютными координатами x/y, LayoutGraph 
-// абстрактные *узлы* (элементы формулы) и *рёбра* (отношения между ними):
+// Вместо того чтобы работать с абсолютными координатами x/y, LayoutGraph оперирует
+// абстрактными *узлами* (элементы формулы) и *рёбрами* (отношения между ними):
 // 
 // ░ Узлы (LayoutNode):
 //     Каждый узел представляет собой отдельный элемент на ASCII-плоскости:
@@ -67,9 +67,55 @@ namespace AsciiMathParser {
 
 			// Узел графа: текстовый фрагмент или фича (bar, sqrt, bracket, …)
 			struct LayoutNode {
-				NodeId id;
-				Model::Region region;
-				std::string role;
+				const NodeId id;
+				const Model::Region region;
+				const std::string role;
+				const std::string content;
+
+				LayoutNode(
+					const NodeId& id,
+					const Model::Region& region,
+					const std::string& role,
+					const std::string& content = ""
+				) 
+					: id{ id }
+					, region{ region }
+					, role{ role }
+					, content{ content } {
+				}
+
+				// Возвращает содержимое узла как строку (без крайних пробелов).
+				// Если узел многострочный — строки разделяются символом '|'.
+				static LayoutNode MakeWithContent(
+					const Model::AsciiGrid& grid,
+					const NodeId& id,
+					const Model::Region& region,
+					const std::string& role
+				) {
+					std::string content{};
+
+					for (int y = region.rows.y1; y <= region.rows.y2; ++y) {
+						for (int x = region.cols.x1; x <= region.cols.x2; ++x) {
+							content.push_back(grid.At(y, x));
+						}
+						if (y < region.rows.y2) {
+							content.push_back('|'); // если узел занимает несколько строк
+						}
+					}
+
+					// Удаляем пробелы по краям
+					auto trimFn = [](std::string& s) {
+						while (!s.empty() && s.front() == ' ') {
+							s.erase(s.begin());
+						}
+						while (!s.empty() && s.back() == ' ') {
+							s.pop_back();
+						}
+						};
+
+					trimFn(content);
+					return LayoutNode{ id, region, role, content };
+				}
 			};
 
 			// Ребро графа: направленное отношение между двумя узлами
@@ -89,11 +135,25 @@ namespace AsciiMathParser {
 			//
 			class LayoutGraph {
 			public:
-				LayoutGraph() : nodes{}, edges{} {}
+				LayoutGraph() {
+				}
 
-				NodeId AddNode(const Model::Region& region, const std::string& role) {
+				NodeId AddNode(
+					const Model::Region& region,
+					const std::string& role
+				) {
 					const NodeId nid = static_cast<NodeId>(this->nodes.size());
-					this->nodes.push_back({ nid, region, role });
+					this->nodes.push_back(LayoutNode{ nid, region, role });
+					return nid;
+				}
+
+				NodeId AddNode(
+					const Model::AsciiGrid& grid,
+					const Model::Region& region,
+					const std::string& role
+				) {
+					const NodeId nid = static_cast<NodeId>(this->nodes.size());
+					this->nodes.push_back(LayoutNode::MakeWithContent(grid, nid, region, role));
 					return nid;
 				}
 
@@ -101,14 +161,21 @@ namespace AsciiMathParser {
 					this->edges.push_back({ a, b, kind });
 				}
 
-				const std::vector<LayoutNode>& Nodes() const noexcept { return this->nodes; }
-				const std::vector<LayoutEdge>& Edges() const noexcept { return this->edges; }
+				const std::vector<LayoutNode>& Nodes() const { 
+					return this->nodes;
+				}
+
+				const std::vector<LayoutEdge>& Edges() const {
+					return this->edges;
+				}
 
 				// Быстрый поиск узлов по типу («bar», «text-run», …)
 				std::vector<NodeId> FindByRole(const std::string& role) const {
 					std::vector<NodeId> res{};
 					for (const auto& n : this->nodes) {
-						if (n.role == role) res.push_back(n.id);
+						if (n.role == role) {
+							res.push_back(n.id);
+						}
 					}
 					return res;
 				}
@@ -119,19 +186,29 @@ namespace AsciiMathParser {
 				std::vector<NodeId> Neighbors(NodeId node, RelKind kind) const {
 					std::vector<NodeId> res{};
 					if (kind == RelKind::Above) {
-						for (const auto& e : this->edges)
-							if (e.kind == RelKind::Above && e.b == node) res.push_back(e.a);
+						for (const auto& e : this->edges) {
+							if (e.kind == RelKind::Above && e.b == node) {
+								res.push_back(e.a);
+							}
+						}
 						return res;
 					}
+
 					if (kind == RelKind::Below) {
-						for (const auto& e : this->edges)
-							if (e.kind == RelKind::Above && e.a == node) res.push_back(e.b);
+						for (const auto& e : this->edges) {
+							if (e.kind == RelKind::Above && e.a == node) {
+								res.push_back(e.b);
+							}
+						}
 						return res;
 					}
+
 					// Для симметричных связей (LeftOf и др.)
-					for (const auto& e : this->edges)
-						if (e.kind == kind && (e.a == node || e.b == node))
+					for (const auto& e : this->edges) {
+						if (e.kind == kind && (e.a == node || e.b == node)) {
 							res.push_back(e.a == node ? e.b : e.a);
+						}
+					}
 					return res;
 				}
 

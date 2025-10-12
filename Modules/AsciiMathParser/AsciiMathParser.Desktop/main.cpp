@@ -29,22 +29,22 @@
 
 
 
-const std::string text =
-"//math_start                   \n"
-"				                \n"
-"		    a + b               \n"
-"L =  ========================= \n"
-"             z                 \n"
-"//math_end                     \n";
-
 //const std::string text =
-//	"//math_start                   \n"
-//	"				     2y         \n"
-//	"          a + b + ======       \n"
-//	"				     x          \n"
-//	"L =  ========================= \n"
-//	"             z                 \n"
-//	"//math_end                     \n";
+//"//math_start                   \n"
+//"				                \n"
+//"		    a + b               \n"
+//"L =  ========================= \n"
+//"             z                 \n"
+//"//math_end                     \n";
+
+const std::string text =
+	"//math_start                   \n"
+	"				     2y         \n"
+	"          a + b + ======       \n"
+	"				     x          \n"
+	"L =  ========================= \n"
+	"             z                 \n"
+	"//math_end                     \n";
 
 //const std::string text =
 //	"//math_start                           \n"
@@ -67,6 +67,18 @@ const std::string text =
 //	"                                              x_{k}\n"
 //	"//math_end\n";
 
+
+/*
+
+
+			   2y + 1
+	 a + b + ========= * k
+				 x
+L =  =========================
+			     z
+
+
+*/
 
 namespace LocalHelpers {
 	std::string ExtractMathBlock(const std::string& text) {
@@ -96,36 +108,36 @@ namespace LocalHelpers {
 	}
 
 
-	// Возвращает содержимое узла как строку (без крайних пробелов).
-	// Если узел многострочный — строки разделяются символом '|'.
-	std::string ExtractNodeContent(
-		const AsciiMathParser::Core::Model::AsciiGrid& grid,
-		const AsciiMathParser::Core::Layout::LayoutNode& node
-	) {
-		std::string content{};
+	//// Возвращает содержимое узла как строку (без крайних пробелов).
+	//// Если узел многострочный — строки разделяются символом '|'.
+	//std::string ExtractNodeContent(
+	//	const AsciiMathParser::Core::Model::AsciiGrid& grid,
+	//	const AsciiMathParser::Core::Layout::LayoutNode& node
+	//) {
+	//	std::string content{};
 
-		for (int y = node.region.rows.y1; y <= node.region.rows.y2; ++y) {
-			for (int x = node.region.cols.x1; x <= node.region.cols.x2; ++x) {
-				content.push_back(grid.At(y, x));
-			}
-			if (y < node.region.rows.y2) {
-				content.push_back('|'); // если узел занимает несколько строк
-			}
-		}
+	//	for (int y = node.region.rows.y1; y <= node.region.rows.y2; ++y) {
+	//		for (int x = node.region.cols.x1; x <= node.region.cols.x2; ++x) {
+	//			content.push_back(grid.At(y, x));
+	//		}
+	//		if (y < node.region.rows.y2) {
+	//			content.push_back('|'); // если узел занимает несколько строк
+	//		}
+	//	}
 
-		// Удаляем пробелы по краям
-		auto trimFn = [](std::string& s) {
-			while (!s.empty() && s.front() == ' ') {
-				s.erase(s.begin());
-			}
-			while (!s.empty() && s.back() == ' ') {
-				s.pop_back();
-			}
-			};
+	//	// Удаляем пробелы по краям
+	//	auto trimFn = [](std::string& s) {
+	//		while (!s.empty() && s.front() == ' ') {
+	//			s.erase(s.begin());
+	//		}
+	//		while (!s.empty() && s.back() == ' ') {
+	//			s.pop_back();
+	//		}
+	//		};
 
-		trimFn(content);
-		return content;
-	}
+	//	trimFn(content);
+	//	return content;
+	//}
 }
 
 
@@ -180,8 +192,6 @@ int main() {
 
 	// Выведем все узлы с их ролями и bbox
 	for (const auto& n : graph.Nodes()) {
-		std::string content = LocalHelpers::ExtractNodeContent(grid, n);
-
 		// Форматированный вывод с фиксированной шириной
 		std::cout << std::format(
 			"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
@@ -192,7 +202,7 @@ int main() {
 			n.region.cols.x1,
 			n.region.cols.x2,
 			"", // просто отступ для выравнивания колонок
-			(content.empty() ? " " : content) | H::Text::Color::Green
+			n.content | H::Text::Color::Green
 		);
 	}
 
@@ -222,8 +232,6 @@ int main() {
 
 			for (const auto aboveNeighborsId : aboveNeighborsIds) {
 				const auto& aboveNode = graph.Nodes()[static_cast<std::size_t>(aboveNeighborsId)];
-				std::string content = LocalHelpers::ExtractNodeContent(grid, aboveNode);
-
 				std::cout << std::format(
 					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
 					aboveNode.id | H::Text::Color::Gray,
@@ -233,7 +241,7 @@ int main() {
 					aboveNode.region.cols.x1,
 					aboveNode.region.cols.x2,
 					"", // просто отступ для выравнивания колонок
-					(content.empty() ? " " : content) | H::Text::Color::Green
+					aboveNode.content | H::Text::Color::Green
 				);
 			}
 		}
@@ -243,8 +251,6 @@ int main() {
 
 			for (const auto belowNeighborsId : belowNeighborsIds) {
 				const auto& belowNode = graph.Nodes()[static_cast<std::size_t>(belowNeighborsId)];
-				std::string content = LocalHelpers::ExtractNodeContent(grid, belowNode);
-
 				std::cout << std::format(
 					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
 					belowNode.id | H::Text::Color::Gray,
@@ -254,7 +260,7 @@ int main() {
 					belowNode.region.cols.x1,
 					belowNode.region.cols.x2,
 					"", // просто отступ для выравнивания колонок
-					(content.empty() ? " " : content) | H::Text::Color::Green
+					belowNode.content | H::Text::Color::Green
 				);
 			}
 		}

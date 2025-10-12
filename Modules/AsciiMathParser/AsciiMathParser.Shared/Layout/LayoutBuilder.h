@@ -62,7 +62,7 @@ namespace AsciiMathParser {
 		namespace Layout {
 			struct LayoutBuilderOptions {
 				double minRelativeXOverlap = 0.5; // требуемая доля перекрытия по X
-				int    minTextRunLen = 1;         // минимальная длина текстового сегмента
+				int minTextRunLen = 1;            // минимальная длина текстового сегмента
 			};
 
 			//
@@ -85,45 +85,229 @@ namespace AsciiMathParser {
 					const std::vector<Detect::FeatureRegion>& features
 				) const {
 					LayoutGraph g{};
-					this->AddTextRuns_(g, grid, features);   // шаг 1
-					this->AddFeatureNodes_(g, features);     // шаг 2
-					this->WireSpatialRelations_(g, grid);    // шаг 3
+					this->AddTextRuns(g, grid, features);   // шаг 1
+					this->AddFeatureNodes(g, features);     // шаг 2
+					this->WireSpatialRelations(g, grid);    // шаг 3
 					return g;
 				}
 
 			private:
-				// ↓↓↓ служебные методы ↓↓↓
+				// 1️. Создание текстовых узлов (text-run)
+				void AddTextRuns(
+					LayoutGraph& outGraph,
+					const Model::AsciiGrid& grid,
+					const std::vector<Detect::FeatureRegion>& features
+				) const {
+					const auto barKeys = this->BuildBarKeySet(features);
+					for (int y = 0; y < grid.Height(); ++y) {
+						int x = 0;
+						while (x < grid.Width()) {
+							while (x < grid.Width() && grid.At(y, x) == ' ') {
+								++x;
+							}
+							if (x >= grid.Width()) {
+								break;
+							}
 
-				// Проверяем, вся ли область состоит из '='.
-				bool IsAllDashes_(const Model::AsciiGrid& grid, const Model::Region& r) const {
-					for (int y = r.rows.y1; y <= r.rows.y2; ++y)
-						for (int x = r.cols.x1; x <= r.cols.x2; ++x)
-							if (grid.At(y, x) != '=') return false;
-					return true;
+							const int xStart = x;
+							while (x < grid.Width() && grid.At(y, x) != ' ') {
+								++x;
+							}
+
+							const int xEnd = x - 1;
+							const int len = xEnd - xStart + 1;
+							if (len < this->options.minTextRunLen) {
+								continue;
+							}
+
+							Model::Region r{ 
+								Model::SpanY{ y, y },
+								Model::SpanX{ xStart, xEnd }
+							};
+
+							// Пропускаем сегменты, которые совпадают с bar
+							if (this->IsAllDashes(grid, r) && this->IsExactBarRegion(barKeys, r)) {
+								continue;
+							}
+							outGraph.AddNode(grid, r, "text-run");
+						}
+					}
 				}
 
-				// Проверяем, есть ли хотя бы одна пустая строка между областями.
-				// Если области вплотную — тоже считаем, что разрыв допустим.
-				bool HasEmptyRowBetween_(
-					const Model::AsciiGrid& grid,
-					const Model::Region& upper,
-					const Model::Region& lower
+
+				// 2️. Добавление узлов-фич (bar, sqrt, bracket …)
+				void AddFeatureNodes(
+					LayoutGraph& outGraph,
+					const std::vector<Detect::FeatureRegion>& features
 				) const {
-					if (lower.rows.y1 - upper.rows.y2 <= 1)
-						return true;
-					for (int y = upper.rows.y2 + 1; y <= lower.rows.y1 - 1; ++y)
-						if (Model::Geometry::IsRowRangeAllSpace(grid, y, lower.cols.x1, lower.cols.x2))
-							return true;
+					for (const auto& f : features) {
+						outGraph.AddNode(f.region, f.featureKind);
+					}
+				}
+
+				// 3️. Построение связей bar ↔ text-run
+				void WireSpatialRelations(
+					LayoutGraph& outGraph,
+					const Model::AsciiGrid& grid
+				) const {
+					const auto& nodesRef = outGraph.Nodes();
+					const std::size_t n = nodesRef.size();
+
+					auto add_edge_once = [&](Layout::NodeId u, Layout::NodeId v, RelKind k) {
+						for (const auto& e : outGraph.Edges()) {
+							if (e.a == u && e.b == v && e.kind == k) {
+								return;
+							}
+						}
+						outGraph.AddEdge(u, v, k);
+						};
+
+					// Соберём список баров для проверки «чистого коридора»
+					const auto barRegions = this->CollectBarRegions(outGraph);
+
+					for (std::size_t i = 0; i < n; ++i) {
+						const auto& bar = nodesRef[i];
+						if (bar.role != "bar") {
+							continue;
+						}
+
+						for (std::size_t j = 0; j < n; ++j) {
+							if (i == j) {
+								continue;
+							}
+
+							const auto& other = nodesRef[j];
+							if (other.role != "text-run" && other.role != "bar") {
+								continue;
+							}
+
+							// Перекрытие по X должно быть достаточным
+							const int overlapX = bar.region.OverlapX(other.region);
+							const int baseBar = std::max(1, bar.region.Width());
+							const int baseOth = std::max(1, other.region.Width());
+							const double relBar = double(overlapX) / baseBar;
+							const double relOth = double(overlapX) / baseOth;
+
+							if (relBar < this->options.minRelativeXOverlap &&
+								relOth < this->options.minRelativeXOverlap) {
+								continue;
+							}
+
+							// Ориентация: (верх) --Above--> (низ)
+							if (other.region.rows.y2 < bar.region.rows.y1) {
+								// other над bar
+								const bool ok =
+									(other.role == "bar")
+									? true // bar→bar: разрешаем без коридора (вложенные дроби)
+									: this->HasClearVerticalCorridor(grid, other.region, bar.region, barRegions);
+
+								if (ok) {
+									add_edge_once(other.id, bar.id, RelKind::Above);
+								}
+							}
+							else if (bar.region.rows.y2 < other.region.rows.y1) {
+								// bar над other
+								const bool ok =
+									(other.role == "bar")
+									? true // bar→bar: разрешаем без коридора (вложенные дроби)
+									: this->HasClearVerticalCorridor(grid, bar.region, other.region, barRegions);
+
+								if (ok) {
+									add_edge_once(bar.id, other.id, RelKind::Above);
+								}
+							}
+						}
+					}
+				}
+
+				// Быстрый список всех bar-регионов (по узлам графа)
+				std::vector<Model::Region> CollectBarRegions(
+					const LayoutGraph& g
+				) const {
+					std::vector<Model::Region> bars{};
+					for (const auto& n : g.Nodes()) {
+						if (n.role == "bar") {
+							bars.push_back(n.region);
+						}
+					}
+					return bars;
+				}
+
+				// Принадлежит ли клетка (y,x) какому-либо bar-региону
+				bool IsCellInAnyBar(
+					const std::vector<Model::Region>& bars,
+					const int y,
+					const int x
+				) const {
+					for (const auto& r : bars) {
+						if (r.rows.y1 <= y && y <= r.rows.y2) {
+							if (r.cols.x1 <= x && x <= r.cols.x2) {
+								return true;
+							}
+						}
+					}
 					return false;
 				}
 
+				// «Чистый вертикальный коридор» для пары (верх → низ) по X-перекрытию.
+				// Разрешаем ' ' и '=' (если '=' принадлежит какому-то bar).
+				bool HasClearVerticalCorridor(
+					const Model::AsciiGrid& grid,
+					const Model::Region& upper,
+					const Model::Region& lower,
+					const std::vector<Model::Region>& bars
+				) const {
+					const int overlapX1 = std::max(upper.cols.x1, lower.cols.x1);
+					const int overlapX2 = std::min(upper.cols.x2, lower.cols.x2);
+					if (overlapX2 < overlapX1) {
+						return false; // нет реального перекрытия по X
+					}
+
+					// Вплотную по Y — считаем коридор «чистым»
+					if (lower.rows.y1 - upper.rows.y2 <= 1) {
+						return true;
+					}
+
+					// Проверяем вертикальный коридор между верхним и нижним регионами.
+					// Сканируем только по тем колонкам (x), где области реально пересекаются.
+					for (int x = overlapX1; x <= overlapX2; ++x) {
+						for (int y = upper.rows.y2 + 1; y <= lower.rows.y1 - 1; ++y) {
+							const char c = grid.At(y, x);
+							if (c == ' ') {
+								continue;
+							}
+							if (c == '=') {
+								if (this->IsCellInAnyBar(bars, y, x)) {
+									continue; // '=' внутри любого bar — это допустимо
+								}
+							}
+							return false; // встретили «посторонний» символ → коридор «грязный»
+						}
+					}
+					return true;
+				}
+
+
+				// Проверяем, вся ли область состоит из '='.
+				bool IsAllDashes(const Model::AsciiGrid& grid, const Model::Region& r) const {
+					for (int y = r.rows.y1; y <= r.rows.y2; ++y) {
+						for (int x = r.cols.x1; x <= r.cols.x2; ++x) {
+							if (grid.At(y, x) != '=') {
+								return false;
+							}
+						}
+					}
+					return true;
+				}
+
+
 				// Сохраняем координаты всех bar-фич, чтобы не создавать
 				// дублирующие text-run'ы из тех же «====».
-				std::unordered_set<std::uint64_t> BuildBarKeySet_(
+				std::unordered_set<std::uint64_t> BuildBarKeySet(
 					const std::vector<Detect::FeatureRegion>& features
 				) const {
 					std::unordered_set<std::uint64_t> keys{};
-					for (const auto& f : features)
+					for (const auto& f : features) {
 						if (f.featureKind == "bar") {
 							const auto& r = f.region;
 							const std::uint64_t key =
@@ -133,10 +317,11 @@ namespace AsciiMathParser {
 								(static_cast<std::uint64_t>(r.cols.x2));
 							keys.insert(key);
 						}
+					}
 					return keys;
 				}
 
-				bool IsExactBarRegion_(
+				bool IsExactBarRegion(
 					const std::unordered_set<std::uint64_t>& barKeys,
 					const Model::Region& r
 				) const {
@@ -146,89 +331,6 @@ namespace AsciiMathParser {
 						(static_cast<std::uint64_t>(r.cols.x1) << 16) ^
 						(static_cast<std::uint64_t>(r.cols.x2));
 					return (barKeys.find(key) != barKeys.end());
-				}
-
-				// 1️⃣ Создание текстовых узлов (text-run)
-				void AddTextRuns_(
-					LayoutGraph& outGraph,
-					const Model::AsciiGrid& grid,
-					const std::vector<Detect::FeatureRegion>& features
-				) const {
-					const auto barKeys = this->BuildBarKeySet_(features);
-					for (int y = 0; y < grid.Height(); ++y) {
-						int x = 0;
-						while (x < grid.Width()) {
-							while (x < grid.Width() && grid.At(y, x) == ' ') ++x;
-							if (x >= grid.Width()) break;
-							const int xStart = x;
-							while (x < grid.Width() && grid.At(y, x) != ' ') ++x;
-							const int xEnd = x - 1;
-							const int len = xEnd - xStart + 1;
-							if (len < this->options.minTextRunLen) continue;
-
-							Model::Region r{ Model::SpanY{ y, y }, Model::SpanX{ xStart, xEnd } };
-							// Пропускаем сегменты, которые совпадают с bar
-							if (this->IsAllDashes_(grid, r) && this->IsExactBarRegion_(barKeys, r))
-								continue;
-
-							outGraph.AddNode(r, "text-run");
-						}
-					}
-				}
-
-				// 2️⃣ Добавление узлов-фич (bar, sqrt, bracket …)
-				void AddFeatureNodes_(
-					LayoutGraph& outGraph,
-					const std::vector<Detect::FeatureRegion>& features
-				) const {
-					for (const auto& f : features)
-						outGraph.AddNode(f.region, f.featureKind);
-				}
-
-				// 3️⃣ Построение связей bar ↔ text-run
-				void WireSpatialRelations_(
-					LayoutGraph& outGraph,
-					const Model::AsciiGrid& grid
-				) const {
-					const auto& nodesRef = outGraph.Nodes();
-					const std::size_t n = nodesRef.size();
-
-					auto add_edge_once = [&](Layout::NodeId u, Layout::NodeId v, RelKind k) {
-						for (const auto& e : outGraph.Edges())
-							if (e.a == u && e.b == v && e.kind == k) return;
-						outGraph.AddEdge(u, v, k);
-						};
-
-					for (std::size_t i = 0; i < n; ++i) {
-						const auto& bar = nodesRef[i];
-						if (bar.role != "bar") continue;
-
-						for (std::size_t j = 0; j < n; ++j) {
-							if (i == j) continue;
-							const auto& txt = nodesRef[j];
-							if (txt.role != "text-run") continue;
-
-							// Проверяем, пересекаются ли по X достаточно сильно
-							const int overlapX = bar.region.OverlapX(txt.region);
-							const int baseBar = std::max(1, bar.region.Width());
-							const int baseTxt = std::max(1, txt.region.Width());
-							const double relBar = double(overlapX) / baseBar;
-							const double relTxt = double(overlapX) / baseTxt;
-							if (relBar < this->options.minRelativeXOverlap &&
-								relTxt < this->options.minRelativeXOverlap)
-								continue;
-
-							// Добавляем ориентированную связь: (верх) --Above--> (низ)
-							if (txt.region.rows.y2 < bar.region.rows.y1) {
-								if (this->HasEmptyRowBetween_(grid, txt.region, bar.region))
-									add_edge_once(txt.id, bar.id, RelKind::Above);
-							}
-							else if (bar.region.rows.y2 < txt.region.rows.y1) {
-								if (this->HasEmptyRowBetween_(grid, bar.region, txt.region))
-									add_edge_once(bar.id, txt.id, RelKind::Above);
-							}
-						}
-					}
 				}
 
 			private:

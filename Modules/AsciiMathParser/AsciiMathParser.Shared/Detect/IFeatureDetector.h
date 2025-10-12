@@ -20,9 +20,7 @@ namespace AsciiMathParser {
 			public:
 				virtual ~IFeatureDetector() = default;
 
-				virtual std::vector<FeatureRegion> Detect(
-					const Model::AsciiGrid& grid
-				) const = 0;
+				virtual std::vector<FeatureRegion> Detect(const Model::AsciiGrid& grid) const = 0;
 			};
 		}
 	}
