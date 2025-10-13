@@ -213,15 +213,15 @@ namespace Dump {
 
 				Dump::Indent(depth);
 				std::cout << "  Num:\n";
-				Dump::DumpNodes(f->GetNum().GetNodes(), depth + 2);
+				Dump::DumpNodes(f->num.nodes, depth + 2);
 
 				Dump::Indent(depth);
 				std::cout << "  Den:\n";
-				Dump::DumpNodes(f->GetDen().GetNodes(), depth + 2);
+				Dump::DumpNodes(f->den.nodes, depth + 2);
 			}
 			else if (const auto* s = dynamic_cast<const Symbol*>(n.get())) {
 				Dump::Indent(depth);
-				std::cout << std::format("[Symbol] '{}'\n", s->GetContent());
+				std::cout << std::format("[Symbol] '{}'\n", s->content);
 			}
 			else {
 				Dump::Indent(depth);
