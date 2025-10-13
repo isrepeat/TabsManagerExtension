@@ -42,13 +42,24 @@
 //"             z                 \n"
 //"//math_end                     \n";
 
+//const std::string text =
+//	"//math_start                   \n"
+//	"                    2y         \n"
+//	"          a + b + ======       \n"
+//	"                    n          \n"
+//	"L =  ========================= \n"
+//	"                z + h          \n"
+//	"//math_end                     \n";
+
 const std::string text =
 	"//math_start                   \n"
 	"                    2y         \n"
-	"          a + b + ======       \n"
+	"          a + b + ====== * k   \n"
 	"                    n          \n"
 	"L =  ========================= \n"
-	"                z + h          \n"
+	"                     e         \n"
+	"                z + ===        \n"
+	"                     2         \n"
 	"//math_end                     \n";
 
 //const std::string text =
