@@ -1,11 +1,16 @@
 #include <Helpers/Text.h>
 
-#include "Layout/LayoutBuilder.h"
-#include "Layout/LayoutGraph.h"
-#include "Detect/FractionBarDetector.h"
-#include "Detect/IFeatureDetector.h"
-#include "Model/Geometry.h"
+//#include "Layout/LayoutBuilder.h"
+//#include "Layout/LayoutGraph.h"
+//#include "Detect/FractionBarDetector.h"
+//#include "Detect/IFeatureDetector.h"
+//#include "Model/Geometry.h"
+//#include "Model/Grid.h"
+
 #include "Model/Grid.h"
+#include "Detect/FractionBarDetector.h"
+#include "Parse/RegionParser.h"
+#include "Model/INode.h"
 
 #include <iostream>
 #include <format>
@@ -31,19 +36,19 @@
 
 //const std::string text =
 //"//math_start                   \n"
-//"				                \n"
-//"		    a + b               \n"
+//"                               \n"
+//"            a + b              \n"
 //"L =  ========================= \n"
 //"             z                 \n"
 //"//math_end                     \n";
 
 const std::string text =
 	"//math_start                   \n"
-	"				     2y         \n"
+	"                    2y         \n"
 	"          a + b + ======       \n"
-	"				     x          \n"
+	"                    n          \n"
 	"L =  ========================= \n"
-	"             z                 \n"
+	"                z + h          \n"
 	"//math_end                     \n";
 
 //const std::string text =
@@ -70,15 +75,63 @@ const std::string text =
 
 /*
 
+                                       e
+							    2y + =====				[bar1]
+								       2
+					  a + b + ============ * k			[bar2]
+								    n
+				L =  =============================		[bar3]
+								 z
 
-			   2y + 1
-	 a + b + ========= * k
-				 x
-L =  =========================
-			     z
+1)                               
+				      		         
+              Num = "e" (raw text)
+			/
+      Frac_1
+			\
+			  Den = "2" (raw text)
 
+			                e
+			  Num = "2y + ====" (raw text)
+			/               2
+	  Frac_2
+			\
+			  Den = "n" (raw text)
+									 					 
+									 e
+							  2y + =====
+							         2
+              Num = "a + b + =========== * k" (raw text)
+			/ 		              n
+      Frac_3  					  
+			\
+              Den = "z" (raw text)
+
+				 
+2)
+
+			  Num = { Symbol{e} }
+			/
+	  Frac_1
+			\
+			  Den = { Symbol{2} }
+
+												   
+			  Num = { Symbol{2y}, Symbol{+}, Frac{Num: Symbol{e}; Den: Symbol{2}} }
+			/
+	  Frac_2
+			\
+			  Den = { Symbol{n} }
+
+
+			  Num = { Symbol{a}, Symbol{+}, Symbol{b}, Frac{Num: Frac{Num: Symbol{e}; Den: Symbol{2}}; Den: Symbol{n}}, Symbol{*}, Symbol{k} }
+			/
+      Frac_3
+			\
+			  Den = { Symbol{z} }
 
 */
+
 
 namespace LocalHelpers {
 	std::string ExtractMathBlock(const std::string& text) {
@@ -107,209 +160,268 @@ namespace LocalHelpers {
 		return text;
 	}
 
+	AsciiMathParser::Core::Model::Region WholeRegion(
+		const AsciiMathParser::Core::Model::AsciiGrid& grid
+	) {
+		using namespace AsciiMathParser::Core::Model;
 
-	//// Возвращает содержимое узла как строку (без крайних пробелов).
-	//// Если узел многострочный — строки разделяются символом '|'.
-	//std::string ExtractNodeContent(
-	//	const AsciiMathParser::Core::Model::AsciiGrid& grid,
-	//	const AsciiMathParser::Core::Layout::LayoutNode& node
-	//) {
-	//	std::string content{};
+		const int h = grid.Height();
+		const int w = grid.Width();
 
-	//	for (int y = node.region.rows.y1; y <= node.region.rows.y2; ++y) {
-	//		for (int x = node.region.cols.x1; x <= node.region.cols.x2; ++x) {
-	//			content.push_back(grid.At(y, x));
-	//		}
-	//		if (y < node.region.rows.y2) {
-	//			content.push_back('|'); // если узел занимает несколько строк
-	//		}
-	//	}
+		Region r{
+			SpanY{ 0, h > 0 ? (h - 1) : 0 },
+			SpanX{ 0, w > 0 ? (w - 1) : 0 }
+		};
 
-	//	// Удаляем пробелы по краям
-	//	auto trimFn = [](std::string& s) {
-	//		while (!s.empty() && s.front() == ' ') {
-	//			s.erase(s.begin());
-	//		}
-	//		while (!s.empty() && s.back() == ' ') {
-	//			s.pop_back();
-	//		}
-	//		};
-
-	//	trimFn(content);
-	//	return content;
-	//}
+		return r;
+	}
 }
 
 
-int main() {
-	const std::string mathBlock = LocalHelpers::ExtractMathBlock(text);
 
-	AsciiMathParser::Core::Model::AsciiGrid grid{
+namespace Dump {
+
+	using namespace AsciiMathParser::Core::Model;
+
+	void Indent(
+		int depth
+	) {
+		for (int i = 0; i < depth; ++i) {
+			std::cout << "  ";
+		}
+	}
+
+	void DumpNodes(
+		const std::vector<std::unique_ptr<INode>>& nodes,
+		int depth = 0
+	) {
+		for (const auto& n : nodes) {
+			if (const auto* f = dynamic_cast<const Frac*>(n.get())) {
+				Dump::Indent(depth);
+				std::cout << "[Frac]\n";
+
+				Dump::Indent(depth);
+				std::cout << "  Num:\n";
+				Dump::DumpNodes(f->GetNum().GetNodes(), depth + 2);
+
+				Dump::Indent(depth);
+				std::cout << "  Den:\n";
+				Dump::DumpNodes(f->GetDen().GetNodes(), depth + 2);
+			}
+			else if (const auto* s = dynamic_cast<const Symbol*>(n.get())) {
+				Dump::Indent(depth);
+				std::cout << std::format("[Symbol] '{}'\n", s->GetContent());
+			}
+			else {
+				Dump::Indent(depth);
+				std::cout << "[Unknown node]\n";
+			}
+		}
+	}
+
+} // namespace Dump
+
+
+
+int main() {
+	using namespace AsciiMathParser::Core;
+
+	const std::string mathBlock = LocalHelpers::ExtractMathBlock(
+		text
+	);
+
+	std::cout << "==== Raw block ====\n";
+	std::cout << mathBlock << "\n\n";
+
+	// Grid
+	Model::AsciiGrid grid{
 		mathBlock
 	};
 
-	// -------- Detect --------
-	AsciiMathParser::Core::Detect::FractionBarDetector barDetector{};
-	const auto features = barDetector.Detect(
+	// -------- Detect (бары уже с готовыми num/den Region внутри Detect::FractionBar) --------
+	Detect::FractionBarDetector barDetector{};
+
+	const auto features = barDetector.DetectBars(
 		grid
 	);
 
 	int barCount = 0;
+
 	for (const auto& f : features) {
-		if (f.featureKind == "bar") {
-			++barCount;
-		}
+		++barCount;
 	}
 
 	std::cout << std::format("Features total: {}\n", features.size());
 	std::cout << std::format("  bars: {}\n", barCount);
 
-	for (const auto& f : features) {
-		if (f.featureKind == "bar") {
-			std::cout << std::format("    bar: y={}, x=({}..{})\n",
-				f.bandY,
-				f.bandX1,
-				f.bandX2
-			);
-		}
-	}
+	//for (const auto& f : features) {
+	//	std::cout << std::format(
+	//		"    bar: y={}, x=({}..{}) | num=[{:2}..{:2}]×[{:2}..{:2}]  den=[{:2}..{:2}]×[{:2}..{:2}]\n",
+	//		f.bandY,
+	//		f.bandX1,
+	//		f.bandX2,
+	//		f.numRegion.rows.y1,
+	//		f.numRegion.rows.y2,
+	//		f.numRegion.cols.x1,
+	//		f.numRegion.cols.x2,
+	//		f.denRegion.rows.y1,
+	//		f.denRegion.rows.y2,
+	//		f.denRegion.cols.x1,
+	//		f.denRegion.cols.x2
+	//	);
+	//}
 
-	// -------- Layout --------
-	AsciiMathParser::Core::Layout::LayoutBuilderOptions lbOpts{};
-	AsciiMathParser::Core::Layout::LayoutBuilder layoutBuilder{
-		lbOpts
-	};
+	// -------- Parse (RegionParser) --------
+	Parse::RegionParser regionParser{};
 
-	auto graph = layoutBuilder.Build(
+	const auto whole = LocalHelpers::WholeRegion(
+		grid
+	);
+
+	auto ast = regionParser.ParseRegion(
 		grid,
+		whole,
 		features
 	);
 
-	std::cout << std::format("\nLayoutGraph:\n  nodes: {}\n  edges: {}\n",
-		graph.Nodes().size(),
-		graph.Edges().size()
-	);
-
-	// Выведем все узлы с их ролями и bbox
-	for (const auto& n : graph.Nodes()) {
-		// Форматированный вывод с фиксированной шириной
-		std::cout << std::format(
-			"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
-			n.id | H::Text::Color::Gray,
-			n.role | H::Text::Color::BrightBlue,
-			n.region.rows.y1,
-			n.region.rows.y2,
-			n.region.cols.x1,
-			n.region.cols.x2,
-			"", // просто отступ для выравнивания колонок
-			n.content | H::Text::Color::Green
-		);
-	}
-
-
-	// Для каждой «bar» покажем соседей Above/Below (что над/под полосой)
-	using RelKind = AsciiMathParser::Core::Layout::RelKind;
-
-	const auto barNodes = graph.FindByRole(
-		"bar"
-	);
-
-	for (const auto nodeId : barNodes) {
-		std::cout << std::format("\nbar node#{} relations:\n", nodeId);
-
-		const auto aboveNeighborsIds = graph.Neighbors(
-			nodeId,
-			RelKind::Above
-		);
-
-		const auto belowNeighborsIds = graph.Neighbors(
-			nodeId,
-			RelKind::Below
-		);
-
-		if (!aboveNeighborsIds.empty()) {
-			std::cout << "  Above:\n";
-
-			for (const auto aboveNeighborsId : aboveNeighborsIds) {
-				const auto& aboveNode = graph.Nodes()[static_cast<std::size_t>(aboveNeighborsId)];
-				std::cout << std::format(
-					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
-					aboveNode.id | H::Text::Color::Gray,
-					aboveNode.role | H::Text::Color::BrightBlue,
-					aboveNode.region.rows.y1,
-					aboveNode.region.rows.y2,
-					aboveNode.region.cols.x1,
-					aboveNode.region.cols.x2,
-					"", // просто отступ для выравнивания колонок
-					aboveNode.content | H::Text::Color::Green
-				);
-			}
-		}
-
-		if (!belowNeighborsIds.empty()) {
-			std::cout << "  Below:\n";
-
-			for (const auto belowNeighborsId : belowNeighborsIds) {
-				const auto& belowNode = graph.Nodes()[static_cast<std::size_t>(belowNeighborsId)];
-				std::cout << std::format(
-					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
-					belowNode.id | H::Text::Color::Gray,
-					belowNode.role | H::Text::Color::BrightBlue,
-					belowNode.region.rows.y1,
-					belowNode.region.rows.y2,
-					belowNode.region.cols.x1,
-					belowNode.region.cols.x2,
-					"", // просто отступ для выравнивания колонок
-					belowNode.content | H::Text::Color::Green
-				);
-			}
-		}
-	}
+	std::cout << "\n==== AST ====\n";
+	Dump::DumpNodes(ast, 0);
 
 	std::cout << "\n";
 	system("pause");
-	return 0;
+	return 0; // ~FLASH: ~3–5 KB (объектный код теста); SRAM: ~1–5 KB под строки/AST на маленьких примерах.
 }
 
 
-//int main() {
-//	const std::string mathBlock = ExtractMathBlock(text);
+
 //
-//	// 1) Вырезать блок между маркерами можно отдельно; для demo кормим сразу весь текст.
+//
+//int main() {
+//	const std::string mathBlock = LocalHelpers::ExtractMathBlock(text);
+//
 //	AsciiMathParser::Core::Model::AsciiGrid grid{
 //		mathBlock
 //	};
 //
-//	// 2) Найдём все «бары»
-//	AsciiMathParser::Core::FractionBars finder{
+//	// -------- Detect --------
+//	AsciiMathParser::Core::Detect::FractionBarDetector barDetector{};
+//	const auto features = barDetector.Detect(
 //		grid
-//	};
+//	);
 //
-//	const auto bars = finder.FindBars();
-//
-//	std::cout << "Bars found: " << bars.size() << "\n";
-//	for (const auto& b : bars) {
-//		std::cout
-//			<< "  y=" << b.y
-//			<< " x=(" << b.x1 << ".." << b.x2 << ")\n";
+//	int barCount = 0;
+//	for (const auto& f : features) {
+//		if (f.featureKind == "bar") {
+//			++barCount;
+//		}
 //	}
 //
-//	//// 3) Построим иерархию
-//	//AsciiMathParser::Core::BarTreeBuilder builder{
-//	//	grid
-//	//};
+//	std::cout << std::format("Features total: {}\n", features.size());
+//	std::cout << std::format("  bars: {}\n", barCount);
 //
-//	//const auto roots = builder.Build(bars);
+//	for (const auto& f : features) {
+//		if (f.featureKind == "bar") {
+//			std::cout << std::format("    bar: y={}, x=({}..{})\n",
+//				f.bandY,
+//				f.bandX1,
+//				f.bandX2
+//			);
+//		}
+//	}
+//
+//	// -------- Layout --------
+//	AsciiMathParser::Core::Layout::LayoutBuilderOptions lbOpts{};
+//	AsciiMathParser::Core::Layout::LayoutBuilder layoutBuilder{
+//		lbOpts
+//	};
+//
+//	auto graph = layoutBuilder.Build(
+//		grid,
+//		features
+//	);
+//
+//	std::cout << std::format("\nLayoutGraph:\n  nodes: {}\n  edges: {}\n",
+//		graph.Nodes().size(),
+//		graph.Edges().size()
+//	);
+//
+//	// Выведем все узлы с их ролями и bbox
+//	for (const auto& n : graph.Nodes()) {
+//		// Форматированный вывод с фиксированной шириной
+//		std::cout << std::format(
+//			"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
+//			n.id | H::Text::Color::Gray,
+//			n.role | H::Text::Color::BrightBlue,
+//			n.region.rows.y1,
+//			n.region.rows.y2,
+//			n.region.cols.x1,
+//			n.region.cols.x2,
+//			"", // просто отступ для выравнивания колонок
+//			n.content | H::Text::Color::Green
+//		);
+//	}
 //
 //
-//	//// 4) Дамп дерева
-//	//const std::string dump = builder.DumpTree(roots);
-//	//std::cout << "\nTREE:\n" << dump << "\n";
+//	// Для каждой «bar» покажем соседей Above/Below (что над/под полосой)
+//	using RelKind = AsciiMathParser::Core::Layout::RelKind;
 //
-//	//// 5) Грубый псевдо-LaTeX
-//	//const std::string latex = builder.RenderPseudoLatex(roots);
-//	//std::cout << "Pseudo-LaTeX:\n" << latex << "\n";
+//	const auto barNodes = graph.FindByRole(
+//		"bar"
+//	);
 //
+//	for (const auto nodeId : barNodes) {
+//		std::cout << std::format("\nbar node#{} relations:\n", nodeId);
+//
+//		const auto aboveNeighborsIds = graph.Neighbors(
+//			nodeId,
+//			RelKind::Above
+//		);
+//
+//		const auto belowNeighborsIds = graph.Neighbors(
+//			nodeId,
+//			RelKind::Below
+//		);
+//
+//		if (!aboveNeighborsIds.empty()) {
+//			std::cout << "  Above:\n";
+//
+//			for (const auto aboveNeighborsId : aboveNeighborsIds) {
+//				const auto& aboveNode = graph.Nodes()[static_cast<std::size_t>(aboveNeighborsId)];
+//				std::cout << std::format(
+//					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
+//					aboveNode.id | H::Text::Color::Gray,
+//					aboveNode.role | H::Text::Color::BrightBlue,
+//					aboveNode.region.rows.y1,
+//					aboveNode.region.rows.y2,
+//					aboveNode.region.cols.x1,
+//					aboveNode.region.cols.x2,
+//					"", // просто отступ для выравнивания колонок
+//					aboveNode.content | H::Text::Color::Green
+//				);
+//			}
+//		}
+//
+//		if (!belowNeighborsIds.empty()) {
+//			std::cout << "  Below:\n";
+//
+//			for (const auto belowNeighborsId : belowNeighborsIds) {
+//				const auto& belowNode = graph.Nodes()[static_cast<std::size_t>(belowNeighborsId)];
+//				std::cout << std::format(
+//					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
+//					belowNode.id | H::Text::Color::Gray,
+//					belowNode.role | H::Text::Color::BrightBlue,
+//					belowNode.region.rows.y1,
+//					belowNode.region.rows.y2,
+//					belowNode.region.cols.x1,
+//					belowNode.region.cols.x2,
+//					"", // просто отступ для выравнивания колонок
+//					belowNode.content | H::Text::Color::Green
+//				);
+//			}
+//		}
+//	}
+//
+//	std::cout << "\n";
 //	system("pause");
 //	return 0;
 //}

@@ -10,11 +10,11 @@
     <Filter Include="Sources\Model">
       <UniqueIdentifier>{b3dca50e-241e-4c62-b9e9-a1cef3716717}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Sources\Layout">
-      <UniqueIdentifier>{4dd06e4b-023f-4eee-bf54-ce2a59a604b8}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Sources\Detect">
       <UniqueIdentifier>{37170771-dfcc-4ca8-9a6b-a3445faced27}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Sources\Parse">
+      <UniqueIdentifier>{4dd06e4b-023f-4eee-bf54-ce2a59a604b8}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -23,9 +23,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(MSBuildThisFileDirectory)FractionBars.h">
-      <Filter>Sources</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)LogicalBoxParser.h">
       <Filter>Sources</Filter>
     </ClInclude>
@@ -35,23 +32,14 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Geometry.h">
       <Filter>Sources\Model</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\LayoutBuilder.h">
-      <Filter>Sources\Layout</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\LayoutGraph.h">
-      <Filter>Sources\Layout</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Detect\FractionBarDetector.h">
       <Filter>Sources\Detect</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Detect\IFeatureDetector.h">
-      <Filter>Sources\Detect</Filter>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\INode.h">
+      <Filter>Sources\Model</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\BarRelationBuilder.h">
-      <Filter>Sources\Layout</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Layout\RelationBuilderContext.h">
-      <Filter>Sources\Layout</Filter>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionParser.h">
+      <Filter>Sources\Parse</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

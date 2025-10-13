@@ -3,6 +3,11 @@
 #include <string>
 #include <vector>
 
+//
+// ░ AAAA
+// ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+// 
+
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Model {
