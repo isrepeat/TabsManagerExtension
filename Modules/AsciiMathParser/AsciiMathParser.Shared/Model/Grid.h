@@ -9,12 +9,17 @@ namespace AsciiMathParser {
 			// Горизонтальный диапазон (по оси X).
 			// Описывает отрезок: [x1, x2] включительно.
 			struct SpanX {
-				int x1;
-				int x2;
+				const int x1;
+				const int x2;
 
 				// Возвращает ширину диапазона (в символах).
 				int Width() const {
 					return this->x2 - this->x1 + 1;
+				}
+
+				// Проверяет, входит ли заданная координата X в диапазон.
+				bool ContainsX(int x) const {
+					return this->x1 <= x && x <= this->x2;
 				}
 
 				// Вычисляет длину пересечения с другим диапазоном.
@@ -32,31 +37,30 @@ namespace AsciiMathParser {
 			// Вертикальный диапазон (по оси Y).
 			// Описывает диапазон строк: [y1, y2] включительно.
 			struct SpanY {
-				int y1;
-				int y2;
+				const int y1;
+				const int y2;
 
 				// Возвращает высоту диапазона (в строках).
 				int Height() const {
 					return this->y2 - this->y1 + 1;
 				}
 
-				// Проверяет, входит ли заданная координата Y в диапазон.
 				bool ContainsY(int y) const {
-					if (y < this->y1) {
-						return false;
-					}
-					if (y > this->y2) {
-						return false;
-					}
-					return true;
+					return this->y1 <= y && y <= this->y2;
+				}
+
+				int OverlapLength(const SpanY& other) const {
+					const int top = std::max(this->y1, other.y1);
+					const int bottom = std::min(this->y2, other.y2);
+					return bottom < top ? 0 : (bottom - top + 1);
 				}
 			};
 
 
 			// Region - двумерный прямоугольник (область на ASCII-сетке).
 			struct Region {
-				SpanY rows; // Вертикальные границы (строки)
-				SpanX cols; // Горизонтальные границы (столбцы)
+				const SpanX cols; // Горизонтальные границы (столбцы)
+				const SpanY rows; // Вертикальные границы (строки)
 
 				// Ширина области (в символах).
 				int Width() const {
@@ -68,6 +72,11 @@ namespace AsciiMathParser {
 					return this->rows.Height();
 				}
 
+				// Проверяет, входит ли конкретная координата X в диапазон столцов области.
+				bool ContainsX(int x) const {
+					return this->cols.ContainsX(x);
+				}
+
 				// Проверяет, входит ли конкретная координата Y в диапазон строк области.
 				bool ContainsY(int y) const {
 					return this->rows.ContainsY(y);
@@ -76,6 +85,68 @@ namespace AsciiMathParser {
 				// Возвращает длину пересечения по X с другой областью.
 				int OverlapX(const Region& other) const {
 					return this->cols.OverlapLength(other.cols);
+				}
+
+				int OverlapY(const Region& other) const {
+					return this->rows.OverlapLength(other.rows);
+				}
+			};
+
+
+			struct RowRegion {
+				const int y;
+				const SpanX cols;
+
+				RowRegion(
+					const int y,
+					const SpanX cols
+				)
+					: y{ y }
+					, cols{ cols } {
+				}
+
+				int Width() const {
+					return this->cols.Width();
+				}
+
+				Region ToRegion() const {
+					return Region{
+						this->cols,
+						SpanY{ this->y, this->y }
+					};
+				}
+
+				bool ContainsX(const int x) const {
+					return this->cols.ContainsX(x);
+				}
+			};
+
+
+			struct ColRegion {
+				const int x;
+				const SpanY rows;
+
+				ColRegion(
+					const int x,
+					const SpanY rows
+				)
+					: x{ x }
+					, rows{ rows } {
+				}
+
+				int Height() const {
+					return this->rows.Height();
+				}
+
+				bool ContainsY(const int y) const {
+					return this->rows.ContainsY(y);
+				}
+
+				Region ToRegion() const {
+					return Region{
+						SpanX{ this->x, this->x },
+						this->rows
+					};
 				}
 			};
 
@@ -139,8 +210,10 @@ namespace AsciiMathParser {
 
 				// Безопасно возвращает символ по координатам.
 				// Если координата вне диапазона — возвращает пробел.
-				char At(int y, int x) const {
-					if (y < 0 || y >= this->h || x < 0 || x >= this->w) {
+				char At(int x, int y) const {
+					if (x < 0 || x >= this->w ||
+						y < 0 || y >= this->h
+						) {
 						return ' ';
 					}
 					return this->lines[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];

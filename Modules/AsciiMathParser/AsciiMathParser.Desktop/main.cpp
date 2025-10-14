@@ -180,8 +180,8 @@ namespace LocalHelpers {
 		const int w = grid.Width();
 
 		Region r{
-			SpanY{ 0, h > 0 ? (h - 1) : 0 },
-			SpanX{ 0, w > 0 ? (w - 1) : 0 }
+			SpanX{ 0, w > 0 ? (w - 1) : 0 },
+			SpanY{ 0, h > 0 ? (h - 1) : 0 }
 		};
 
 		return r;
@@ -189,48 +189,119 @@ namespace LocalHelpers {
 }
 
 
-
-namespace Dump {
-
-	using namespace AsciiMathParser::Core::Model;
-
-	void Indent(
-		int depth
-	) {
-		for (int i = 0; i < depth; ++i) {
-			std::cout << "  ";
+namespace AsciiMathParser::Core {
+	namespace Dump {
+		static std::string Bg256(int idx) {
+			if (idx < 0) {
+				idx = 0;
+			}
+			if (idx > 255) {
+				idx = 255;
+			}
+			return "\x1b[48;5;" + std::to_string(idx) + "m";
 		}
-	}
 
-	void DumpNodes(
-		const std::vector<std::unique_ptr<INode>>& nodes,
-		int depth = 0
-	) {
-		for (const auto& n : nodes) {
-			if (const auto* f = dynamic_cast<const Frac*>(n.get())) {
-				Dump::Indent(depth);
-				std::cout << "[Frac]\n";
+		static constexpr const char* ANSI_RESET = "\x1b[0m";
 
-				Dump::Indent(depth);
-				std::cout << "  Num:\n";
-				Dump::DumpNodes(f->num.nodes, depth + 2);
-
-				Dump::Indent(depth);
-				std::cout << "  Den:\n";
-				Dump::DumpNodes(f->den.nodes, depth + 2);
+		void PrintGridWithOuterBarHighlight(
+			const AsciiMathParser::Core::Model::AsciiGrid& grid,
+			const std::vector<AsciiMathParser::Core::Detect::FractionBar>& bars,
+			int barIdx = -1,
+			int numBgColor = 236,
+			int denBgColor = 240
+		) {
+			if (bars.empty()) {
+				// просто напечатаем грид без подсветки
+				for (int y = 0; y < grid.Height(); ++y) {
+					for (int x = 0; x < grid.Width(); ++x) {
+						std::cout << grid.At(x, y);
+					}
+					std::cout << '\n';
+				}
+				return;
 			}
-			else if (const auto* s = dynamic_cast<const Symbol*>(n.get())) {
-				Dump::Indent(depth);
-				std::cout << std::format("[Symbol] '{}'\n", s->content);
-			}
-			else {
-				Dump::Indent(depth);
-				std::cout << "[Unknown node]\n";
+
+			// внешняя — последняя
+			const auto& currentBar = barIdx < 0
+				? bars.back()
+				: bars.at(barIdx);
+
+			const std::string NUM_BG = Bg256(numBgColor);
+			const std::string DEN_BG = Bg256(denBgColor);
+
+			for (int y = 0; y < grid.Height(); ++y) {
+				for (int x = 0; x < grid.Width(); ++x) {
+					const bool isBar =
+						(y == currentBar.bar.y) &&
+						(x >= currentBar.bar.cols.x1) &&
+						(x <= currentBar.bar.cols.x2);
+
+					const bool inNum =
+						(x >= currentBar.numRegion.cols.x1) &&
+						(x <= currentBar.numRegion.cols.x2) &&
+						(y >= currentBar.numRegion.rows.y1) &&
+						(y <= currentBar.numRegion.rows.y2);
+
+					const bool inDen =
+						(x >= currentBar.denRegion.cols.x1) &&
+						(x <= currentBar.denRegion.cols.x2) &&
+						(y >= currentBar.denRegion.rows.y1) &&
+						(y <= currentBar.denRegion.rows.y2);
+
+					const char ch = grid.At(x, y);
+
+					if (isBar) {
+						std::cout << ch;
+					}
+					else if (inNum) {
+						std::cout << NUM_BG << ch << ANSI_RESET;
+					}
+					else if (inDen) {
+						std::cout << DEN_BG << ch << ANSI_RESET;
+					}
+					else {
+						std::cout << ch;
+					}
+				}
+				std::cout << '\n';
 			}
 		}
-	}
 
-} // namespace Dump
+		void Indent(int depth) {
+			for (int i = 0; i < depth; ++i) {
+				std::cout << "  ";
+			}
+		}
+
+		void DumpNodes(
+			const std::vector<std::unique_ptr<Model::INode>>& nodes,
+			int depth = 0
+		) {
+			for (const auto& n : nodes) {
+				if (const auto* f = dynamic_cast<const Model::Frac*>(n.get())) {
+					Dump::Indent(depth);
+					std::cout << "[Frac]\n";
+
+					Dump::Indent(depth);
+					std::cout << "  Num:\n";
+					Dump::DumpNodes(f->Num().nodes, depth + 2);
+
+					Dump::Indent(depth);
+					std::cout << "  Den:\n";
+					Dump::DumpNodes(f->Den().nodes, depth + 2);
+				}
+				else if (const auto* s = dynamic_cast<const Model::Symbol*>(n.get())) {
+					Dump::Indent(depth);
+					std::cout << std::format("[Symbol] '{}'\n", s->Content());
+				}
+				else {
+					Dump::Indent(depth);
+					std::cout << "[Unknown node]\n";
+				}
+			}
+		}
+	} // namespace Dump
+}
 
 
 
@@ -252,51 +323,30 @@ int main() {
 	// -------- Detect (бары уже с готовыми num/den Region внутри Detect::FractionBar) --------
 	Detect::FractionBarDetector barDetector{};
 
-	const auto features = barDetector.DetectBars(
+	const auto fractionBars = barDetector.DetectBars(
 		grid
 	);
 
-	int barCount = 0;
+	std::cout << std::format("fractionBars count: {}\n", fractionBars.size());
 
-	for (const auto& f : features) {
-		++barCount;
-	}
+	std::cout << "\n==== Visual (outer num/den) ====\n";
+	Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
 
-	std::cout << std::format("Features total: {}\n", features.size());
-	std::cout << std::format("  bars: {}\n", barCount);
+	//// -------- Parse (RegionParser) --------
+	//Parse::RegionParser regionParser{};
 
-	//for (const auto& f : features) {
-	//	std::cout << std::format(
-	//		"    bar: y={}, x=({}..{}) | num=[{:2}..{:2}]×[{:2}..{:2}]  den=[{:2}..{:2}]×[{:2}..{:2}]\n",
-	//		f.bandY,
-	//		f.bandX1,
-	//		f.bandX2,
-	//		f.numRegion.rows.y1,
-	//		f.numRegion.rows.y2,
-	//		f.numRegion.cols.x1,
-	//		f.numRegion.cols.x2,
-	//		f.denRegion.rows.y1,
-	//		f.denRegion.rows.y2,
-	//		f.denRegion.cols.x1,
-	//		f.denRegion.cols.x2
-	//	);
-	//}
+	//const auto whole = LocalHelpers::WholeRegion(
+	//	grid
+	//);
 
-	// -------- Parse (RegionParser) --------
-	Parse::RegionParser regionParser{};
+	//auto ast = regionParser.ParseRegion(
+	//	grid,
+	//	whole,
+	//	features
+	//);
 
-	const auto whole = LocalHelpers::WholeRegion(
-		grid
-	);
-
-	auto ast = regionParser.ParseRegion(
-		grid,
-		whole,
-		features
-	);
-
-	std::cout << "\n==== AST ====\n";
-	Dump::DumpNodes(ast, 0);
+	//std::cout << "\n==== AST ====\n";
+	//Dump::DumpNodes(ast, 0);
 
 	std::cout << "\n";
 	system("pause");

@@ -1,4 +1,7 @@
 #pragma once
+#include "Geometry.h"
+#include "Grid.h"
+
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -7,33 +10,83 @@
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Model {
-			struct INode {
+			class INode {
+			public:
 				virtual ~INode() = default;
+				virtual Region GetRegion() const = 0;
 			};
+
 
 			struct NodesGroup {
 				std::vector<std::unique_ptr<INode>> nodes;
 			};
 
-			struct Symbol : INode {
-				std::string content;
-			
-				Symbol(std::string content)
-					: content{ std::move(content) } {
+			//
+			// Symbol
+			//
+			class Symbol : public INode {
+			public:
+				Symbol(
+					std::string content,
+					int y,
+					int x
+				)
+					: content{ std::move(content) }
+					, region{
+						SpanX{ x, x },
+						SpanY{ y, y }
+					} {
 				}
+
+				Region GetRegion() const override {
+					return this->region;
+				}
+
+				const std::string& Content() const {
+					return this->content;
+				}
+
+			private:
+				const std::string content;
+				const Region region;
 			};
 
-			struct Frac : INode {
-				NodesGroup num;
-				NodesGroup den;
 
+			//
+			// Frac
+			//
+			class Frac : public INode {
+			public:
 				Frac(
 					NodesGroup num,
-					NodesGroup den
+					NodesGroup den,
+					Region barRegion
 				)
 					: num{ std::move(num) }
-					, den{ std::move(den) } {
+					, den{ std::move(den) }
+					, region{ Geometry::UnionRegions(
+						barRegion,
+						Geometry::UnionRegionsOfNodes(this->num.nodes),
+						Geometry::UnionRegionsOfNodes(this->den.nodes)
+					) } {
 				}
+
+				Region GetRegion() const override {
+					return this->region;
+				}
+
+				const NodesGroup& Num() const {
+					return this->num;
+				}
+
+				const NodesGroup& Den() const {
+					return this->den;
+				}
+
+			private:
+				const NodesGroup num;
+				const NodesGroup den;
+				const Region region;
 			};
 		}
 	}
