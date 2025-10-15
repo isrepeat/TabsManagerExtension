@@ -9,8 +9,8 @@ namespace AsciiMathParser {
 			// Горизонтальный диапазон (по оси X).
 			// Описывает отрезок: [x1, x2] включительно.
 			struct SpanX {
-				const int x1;
-				const int x2;
+				int x1;
+				int x2;
 
 				// Возвращает ширину диапазона (в символах).
 				int Width() const {
@@ -37,8 +37,8 @@ namespace AsciiMathParser {
 			// Вертикальный диапазон (по оси Y).
 			// Описывает диапазон строк: [y1, y2] включительно.
 			struct SpanY {
-				const int y1;
-				const int y2;
+				int y1;
+				int y2;
 
 				// Возвращает высоту диапазона (в строках).
 				int Height() const {
@@ -57,10 +57,10 @@ namespace AsciiMathParser {
 			};
 
 
-			// Region - двумерный прямоугольник (область на ASCII-сетке).
+			// Двумерный прямоугольник (область на ASCII-сетке).
 			struct Region {
-				const SpanX cols; // Горизонтальные границы (столбцы)
-				const SpanY rows; // Вертикальные границы (строки)
+				SpanX cols;
+				SpanY rows;
 
 				// Ширина области (в символах).
 				int Width() const {
@@ -94,12 +94,12 @@ namespace AsciiMathParser {
 
 
 			struct RowRegion {
-				const int y;
-				const SpanX cols;
+				int y;
+				SpanX cols;
 
 				RowRegion(
-					const int y,
-					const SpanX cols
+					int y,
+					SpanX cols
 				)
 					: y{ y }
 					, cols{ cols } {
@@ -109,26 +109,26 @@ namespace AsciiMathParser {
 					return this->cols.Width();
 				}
 
+				bool ContainsX(const int x) const {
+					return this->cols.ContainsX(x);
+				}
+
 				Region ToRegion() const {
 					return Region{
 						this->cols,
 						SpanY{ this->y, this->y }
 					};
 				}
-
-				bool ContainsX(const int x) const {
-					return this->cols.ContainsX(x);
-				}
 			};
 
 
 			struct ColRegion {
-				const int x;
-				const SpanY rows;
+				int x;
+				SpanY rows;
 
 				ColRegion(
-					const int x,
-					const SpanY rows
+					int x,
+					SpanY rows
 				)
 					: x{ x }
 					, rows{ rows } {

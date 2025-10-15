@@ -330,21 +330,21 @@ int main() {
 	std::cout << "\n==== Visual (outer num/den) ====\n";
 	Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
 
-	//// -------- Parse (RegionParser) --------
-	//Parse::RegionParser regionParser{};
+	// -------- Parse (RegionParser) --------
+	Parse::RegionParser regionParser{};
 
-	//const auto whole = LocalHelpers::WholeRegion(
-	//	grid
-	//);
+	const auto whole = LocalHelpers::WholeRegion(
+		grid
+	);
 
-	//auto ast = regionParser.ParseRegion(
-	//	grid,
-	//	whole,
-	//	features
-	//);
+	auto ast = regionParser.ParseRegion(
+		grid,
+		whole,
+		fractionBars
+	);
 
-	//std::cout << "\n==== AST ====\n";
-	//Dump::DumpNodes(ast, 0);
+	std::cout << "\n==== AST ====\n";
+	Dump::DumpNodes(ast, 0);
 
 	std::cout << "\n";
 	system("pause");
