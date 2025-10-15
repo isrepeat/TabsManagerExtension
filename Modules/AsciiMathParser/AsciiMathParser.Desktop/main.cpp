@@ -232,9 +232,9 @@ namespace AsciiMathParser::Core {
 			for (int y = 0; y < grid.Height(); ++y) {
 				for (int x = 0; x < grid.Width(); ++x) {
 					const bool isBar =
-						(y == currentBar.bar.y) &&
-						(x >= currentBar.bar.cols.x1) &&
-						(x <= currentBar.bar.cols.x2);
+						(y == currentBar.barRegion.y) &&
+						(x >= currentBar.barRegion.cols.x1) &&
+						(x <= currentBar.barRegion.cols.x2);
 
 					const bool inNum =
 						(x >= currentBar.numRegion.cols.x1) &&
@@ -321,11 +321,9 @@ int main() {
 	};
 
 	// -------- Detect (бары уже с готовыми num/den Region внутри Detect::FractionBar) --------
-	Detect::FractionBarDetector barDetector{};
+	Detect::FractionBarDetector barDetector{ grid };
 
-	const auto fractionBars = barDetector.DetectBars(
-		grid
-	);
+	const auto fractionBars = barDetector.DetectBars();
 
 	std::cout << std::format("fractionBars count: {}\n", fractionBars.size());
 
@@ -350,7 +348,7 @@ int main() {
 
 	std::cout << "\n";
 	system("pause");
-	return 0; // ~FLASH: ~3–5 KB (объектный код теста); SRAM: ~1–5 KB под строки/AST на маленьких примерах.
+	return 0;
 }
 
 
