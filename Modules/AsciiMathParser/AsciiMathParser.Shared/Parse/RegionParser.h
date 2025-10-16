@@ -21,77 +21,38 @@ namespace AsciiMathParser {
 					const std::vector<Detect::FractionBar>& bars
 				) const {
 					// 1) собрать «детские» бары, лежащие внутри region, и отсортировать
-					//auto children = this->CollectChildBars(region, bars);
 					auto children = this->CollectTopLevelChildBars(region, bars);
-
 					this->SortBarsTopDown(children);
 
 					// 2) рекурсивно построить Frac-узлы по детям
-					std::vector<NodeItem> fracItems{};
+					std::vector<std::unique_ptr<Model::INode>> fracNodes{};
 
 					for (const auto& b : children) {
-						auto numNodes = this->ParseRegion(
-							grid,
-							b.numRegion,
-							bars
-						);
-
-						auto denNodes = this->ParseRegion(
-							grid,
-							b.denRegion,
-							bars
-						);
-
-						NodeItem it{
-							.y = b.barRegion.y,
-							.x = b.barRegion.cols.x1,
-							.node = std::make_unique<Model::Frac>(
-								Model::NodesGroup{ std::move(numNodes) },
-								Model::NodesGroup{ std::move(denNodes) },
-								b.barRegion.ToRegion()
-							)
-						};
-
-						fracItems.push_back(std::move(it));
+						auto numNodes = this->ParseRegion(grid, b.numRegion, bars);
+						auto denNodes = this->ParseRegion(grid, b.denRegion, bars);
+						fracNodes.push_back(std::make_unique<Model::Frac>(
+							Model::NodesGroup{ std::move(numNodes) },
+							Model::NodesGroup{ std::move(denNodes) },
+							b.barRegion.ToRegion()
+						));
 					}
 
 					// 3) построить карту «skip» — зоны, которые нельзя токенизировать как символы
-					const auto skipByRow = this->BuildSkipMap(
-						region,
-						bars
-					);
+					const auto skipByRow = this->BuildSkipMap(region, bars);
 
 					// 4) токенизация оставшегося текста в Symbol-узлы
-					auto symItems = this->TokenizeToSymbolItems(
-						grid,
-						region,
-						skipByRow
-					);
+					auto symNodes = this->TokenizeToSymbols(grid, region, skipByRow);
 
 					// 5) слить Frac + Symbol по порядку чтения
 					auto nodes = this->MergeByReadingOrder(
-						std::move(fracItems),
-						std::move(symItems)
+						std::move(fracNodes),
+						std::move(symNodes)
 					);
 
 					return nodes;
 				}
 
 			private:
-				// ----- служебные записи для мерджа -----
-				struct NodeItem {
-					int y;
-					int x;
-					std::unique_ptr<Model::INode> node;
-				};
-
-				struct SymbolItem {
-					int y;
-					int xStart;
-					std::string text;
-				};
-
-
 				// Возвращает список баров, которые физически находятся внутри region:
 				// их строка черты (y) лежит в пределах region.rows,
 				// а диапазон X полностью вписывается в region.cols.
@@ -106,10 +67,10 @@ namespace AsciiMathParser {
 						if (!region.ContainsY(b.barRegion.y)) {
 							continue;
 						}
-						if (b.barRegion.cols.x1 < region.cols.x1) {
+						if (b.barRegion.Left() < region.Left()) {
 							continue;
 						}
-						if (b.barRegion.cols.x2 > region.cols.x2) {
+						if (b.barRegion.Right() > region.Right()) {
 							continue;
 						}
 						out.push_back(b);
@@ -142,20 +103,17 @@ namespace AsciiMathParser {
 					for (std::size_t i = 0; i < inside.size(); ++i) {
 						const auto& bi = inside[i];
 						bool nested = false;
-
 						for (std::size_t j = 0; j < inside.size(); ++j) {
 							if (i == j) {
 								continue;
 							}
 							const auto& bj = inside[j];
-
 							if (RegionParser::IsBarInsideRegion(bi, bj.numRegion) ||
 								RegionParser::IsBarInsideRegion(bi, bj.denRegion)) {
 								nested = true;
 								break;
 							}
 						}
-
 						if (!nested) {
 							top.push_back(bi);
 						}
@@ -175,73 +133,18 @@ namespace AsciiMathParser {
 							if (a.barRegion.y != b.barRegion.y) {
 								return a.barRegion.y < b.barRegion.y;
 							}
-							else {
-								return a.barRegion.cols.x1 < b.barRegion.cols.x1;
-							}
+							return a.barRegion.Left() < b.barRegion.Left();
 						}
 					);
 				}
 
 
-				////  Формирует карту «запретных» зон (skipByRow):
-				////  для каждой строки (y) в region список X-интервалов, которые нужно пропустить
-				////  при токенизации. Туда попадают:
-				////   • все линии черт (любых баров), пересекающих region по X,
-				////   • окна Num/Den всех дочерних баров (чтобы не дублировать их контент).
-				////  После сбора все интервалы на каждой строке сливаются в MergeRowSpans.
-				//std::unordered_map<int, std::vector<Model::SpanX>> BuildSkipMap(
-				//	const Model::Region& region,
-				//	const std::vector<Detect::FractionBar>& allBars,
-				//	const std::vector<Detect::FractionBar>& children
-				//) const {
-				//	std::unordered_map<int, std::vector<Model::SpanX>> skipByRow{};
-
-				//	// 3.1 любые черты в пределах region по Y + пересечение по X
-				//	for (const auto& b : allBars) {
-				//		const int y = b.barRegion.y;
-				//		if (!region.ContainsY(y)) {
-				//			continue;
-				//		}
-				//		const int L = std::max(region.cols.x1, b.barRegion.cols.x1);
-				//		const int R = std::min(region.cols.x2, b.barRegion.cols.x2);
-				//		if (L <= R) {
-				//			auto& vec = skipByRow[y];
-				//			vec.push_back(Model::SpanX{ L, R });
-				//		}
-				//	}
-
-				//	// 3.2 дочерние окна: бар, num, den — целиком в skip
-				//	for (const auto& b : children) {
-				//		// строка бара
-				//		{
-				//			auto& vec = skipByRow[b.barRegion.y];
-				//			vec.push_back(Model::SpanX{ b.barRegion.cols.x1, b.barRegion.cols.x2 });
-				//		}
-
-				//		// строки числителя
-				//		for (int y = b.numRegion.rows.y1; y <= b.numRegion.rows.y2; ++y) {
-				//			auto& vec = skipByRow[y];
-				//			vec.push_back(Model::SpanX{ b.numRegion.cols.x1, b.numRegion.cols.x2 });
-				//		}
-
-				//		// строки знаменателя
-				//		for (int y = b.denRegion.rows.y1; y <= b.denRegion.rows.y2; ++y) {
-				//			auto& vec = skipByRow[y];
-				//			vec.push_back(Model::SpanX{ b.denRegion.cols.x1, b.denRegion.cols.x2 });
-				//		}
-				//	}
-
-				//	// 3.3 слить интервалы на каждой строке
-				//	for (auto& kv : skipByRow) {
-				//		RegionParser::MergeRowSpans(
-				//			kv.second
-				//		);
-				//	}
-
-				//	return skipByRow;
-				//}
-
-
+				//  Формирует карту «запретных» зон (skipByRow):
+				//  для каждой строки (y) в region список X-интервалов, которые нужно пропустить
+				//  при токенизации. Туда попадают:
+				//   • все линии черт (любых баров), пересекающих region по X,
+				//   • окна Num/Den всех дочерних баров (чтобы не дублировать их контент).
+				//  После сбора все интервалы на каждой строке сливаются в MergeRowSpans.
 				std::unordered_map<int, std::vector<Model::SpanX>> BuildSkipMap(
 					const Model::Region& region,
 					const std::vector<Detect::FractionBar>& allBars
@@ -254,8 +157,8 @@ namespace AsciiMathParser {
 						if (!region.ContainsY(y)) {
 							continue;
 						}
-						const int L = std::max(region.cols.x1, b.barRegion.cols.x1);
-						const int R = std::min(region.cols.x2, b.barRegion.cols.x2);
+						const int L = std::max(region.Left(), b.barRegion.Left());
+						const int R = std::min(region.Right(), b.barRegion.Right());
 						if (L <= R) {
 							skipByRow[y].push_back(Model::SpanX{ L, R });
 						}
@@ -269,30 +172,30 @@ namespace AsciiMathParser {
 						}
 
 						// NUM (клип по текущему region.cols)
-						for (int y = b.numRegion.rows.y1; y <= b.numRegion.rows.y2; ++y) {
+						for (int y = b.numRegion.Top(); y <= b.numRegion.Bottom(); ++y) {
 							if (!region.ContainsY(y)) {
 								continue;
 							}
-							const int L = std::max(region.cols.x1, b.numRegion.cols.x1);
-							const int R = std::min(region.cols.x2, b.numRegion.cols.x2);
+							const int L = std::max(region.Left(), b.numRegion.Left());
+							const int R = std::min(region.Right(), b.numRegion.Right());
 							if (L <= R) {
 								skipByRow[y].push_back(Model::SpanX{ L, R });
 							}
 						}
 
 						// DEN (клип по текущему region.cols)
-						for (int y = b.denRegion.rows.y1; y <= b.denRegion.rows.y2; ++y) {
+						for (int y = b.denRegion.Top(); y <= b.denRegion.Bottom(); ++y) {
 							if (!region.ContainsY(y)) {
 								continue;
 							}
-							const int L = std::max(region.cols.x1, b.denRegion.cols.x1);
-							const int R = std::min(region.cols.x2, b.denRegion.cols.x2);
+							const int L = std::max(region.Left(), b.denRegion.Left());
+							const int R = std::min(region.Right(), b.denRegion.Right());
 							if (L <= R) {
 								skipByRow[y].push_back(Model::SpanX{ L, R });
 							}
 						}
 					}
-
+					
 					// 3) Слить интервалы по строкам.
 					for (auto& kv : skipByRow) {
 						RegionParser::MergeRowSpans(kv.second);
@@ -302,149 +205,141 @@ namespace AsciiMathParser {
 				}
 
 
-				//  Проходит по всем строкам region и формирует Symbol из подряд идущих
-				//  непробельных символов, пропуская все интервалы skipByRow.
-				//  Использует JumpOverSkips для прыжков через «стены».
-				std::vector<SymbolItem> TokenizeToSymbolItems(
+				// Проходит по всем строкам region и формирует Symbol из подряд идущих
+				// непробельных символов, пропуская все интервалы skipByRow.
+				std::vector<std::unique_ptr<Model::INode>> TokenizeToSymbols(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region,
 					const std::unordered_map<int, std::vector<Model::SpanX>>& skipByRow
 				) const {
-					std::vector<SymbolItem> items{};
+					std::vector<std::unique_ptr<Model::INode>> out{};
 
-					for (int y = region.rows.y1; y <= region.rows.y2; ++y) {
-						int x = region.cols.x1;
+					// Проходим все строки текущего региона сверху вниз.
+					for (int y = region.Top(); y <= region.Bottom(); ++y) {
 
+						// Получаем список X-интервалов, которые нужно пропустить на этой строке.
+						// Если строка не имеет пропусков — используем пустой список.
 						const auto it = skipByRow.find(y);
-						const bool hasSpans = (it != skipByRow.end());
-						const std::vector<Model::SpanX>* spans = hasSpans ? &it->second : nullptr;
+						static const std::vector<Model::SpanX> kEmpty{};
+						const auto& rowSkips = (it == skipByRow.end() ? kEmpty : it->second);
 
-						while (x <= region.cols.x2) {
-							RegionParser::JumpOverSkips(
-								hasSpans,
-								spans,
-								x
-							);
+						// Получаем «разрешённые» промежутки X в этой строке,
+						// то есть области, не попадающие в skipRow.
+						for (const auto& allowedRange : RegionParser::AllowedRanges(region, rowSkips)) {
+							// Начинаем обход разрешённого диапазона слева направо.
+							int x = allowedRange.Left();
 
-							while (x <= region.cols.x2 && grid.At(x, y) == ' ') {
-								++x;
+							// Идём по всем символам до конца разрешённого диапазона.
+							while (x <= allowedRange.Right()) {
+								// Пропускаем все пробелы подряд.
+								while (x <= allowedRange.Right() && grid.At(x, y) == ' ') {
+									++x;
+								}
 
-								RegionParser::JumpOverSkips(
-									hasSpans,
-									spans,
-									x
-								);
-							}
-
-							if (x > region.cols.x2) {
-								break;
-							}
-
-							RegionParser::JumpOverSkips(
-								hasSpans,
-								spans,
-								x
-							);
-
-							if (x > region.cols.x2) {
-								break;
-							}
-
-							const int startX = x;
-							std::string token{};
-
-							while (x <= region.cols.x2 && grid.At(x, y) != ' ') {
-								if (RegionParser::IsInsideAnySpan(hasSpans, spans, x)) {
+								// Если после пропусков дошли до конца диапазона — строка исчерпана.
+								if (x > allowedRange.Right()) {
 									break;
 								}
 
-								token.push_back(grid.At(x, y));
-								++x;
-							}
+								// Здесь x указывает на первый непробельный символ токена.
+								const int startX = x;
+								std::string token{};
 
-							if (!token.empty()) {
-								items.push_back(SymbolItem{
-									.y = y,
-									.xStart = startX,
-									.text = std::move(token)
-									});
-							}
-						}
-					}
+								// Собираем последовательность непробельных символов до конца токена
+								// (пока не встретим пробел или конец диапазона).
+								while (x <= allowedRange.Right() && grid.At(x, y) != ' ') {
+									token.push_back(grid.At(x, y));
+									++x;
+								}
 
-					return items;
-				}
-
-
-				// ---------- шаг 5: слияние по порядку чтения ----------
-				std::vector<std::unique_ptr<Model::INode>> MergeByReadingOrder(
-					std::vector<NodeItem> fracItems,
-					std::vector<SymbolItem> symItems
-				) const {
-					// преобразуем SymbolItem → NodeItem
-					std::vector<NodeItem> all{};
-					all.reserve(fracItems.size() + symItems.size());
-
-					for (auto& it : fracItems) {
-						all.push_back(NodeItem{
-							.y = it.y,
-							.x = it.x,
-							.node = std::move(it.node)
-							});
-					}
-
-					for (auto& s : symItems) {
-						auto node = std::make_unique<Model::Symbol>(
-							std::move(s.text),
-							s.y,
-							s.xStart
-						);
-
-						all.push_back(NodeItem{
-							.y = s.y,
-							.x = s.xStart,
-							.node = std::move(node)
-							});
-					}
-
-					std::sort(
-						all.begin(),
-						all.end(),
-						[](const NodeItem& a, const NodeItem& b) {
-							if (a.y != b.y) {
-								return a.y < b.y;
-							}
-							else {
-								return a.x < b.x;
+								// Если собран непустой токен — создаём узел Symbol и сохраняем его.
+								if (!token.empty()) {
+									out.push_back(std::make_unique<Model::Symbol>(
+										std::move(token),
+										startX, // X-позиция первого символа токена
+										y       // строка, на которой токен расположен
+									));
+								}
 							}
 						}
-					);
-
-					std::vector<std::unique_ptr<Model::INode>> out{};
-					out.reserve(all.size());
-
-					for (auto& it : all) {
-						out.push_back(std::move(it.node));
 					}
 
 					return out;
 				}
 
 
-				//  Сливает перекрывающиеся или примыкающие интервалы на одной строке:
-				//  [3..8], [7..10] → [3..10]. Это делает карту skip компактной и
-				//  уменьшает количество прыжков токенайзера.
+				// Слияние по порядку чтения
+				std::vector<std::unique_ptr<Model::INode>> MergeByReadingOrder(
+					std::vector<std::unique_ptr<Model::INode>> fracNodes,
+					std::vector<std::unique_ptr<Model::INode>> symNodes
+				) const {
+					std::vector<std::unique_ptr<Model::INode>> all{};
+					all.reserve(fracNodes.size() + symNodes.size());
+
+					for (auto& p : fracNodes) {
+						all.push_back(std::move(p));
+					}
+					for (auto& p : symNodes) {
+						all.push_back(std::move(p));
+					}
+
+					std::sort(
+						all.begin(),
+						all.end(),
+						[](const std::unique_ptr<Model::INode>& a, const std::unique_ptr<Model::INode>& b) {
+							const auto ra = a->GetRegion();
+							const auto rb = b->GetRegion();
+							if (ra.Left() != rb.Left()) {
+								return ra.Left() < rb.Left(); // первичный ключ — левый край
+							}
+							return ra.Top() < rb.Top(); // вторичный — верх
+						}
+					);
+
+					return all;
+				}
+
+
+				// Разность по X: всё, что можно читать в строке y внутри region (без skip-интервалов).
+				static std::vector<Model::SpanX> AllowedRanges(
+					const Model::Region& region,
+					const std::vector<Model::SpanX>& skipRow
+				) {
+					std::vector<Model::SpanX> free{};
+
+					if (skipRow.empty()) {
+						free.push_back(Model::SpanX{ region.Left(), region.Right() });
+						return free;
+					}
+
+					int cur = region.Left();
+					for (const auto& s : skipRow) {
+						if (s.Left() > cur) {
+							free.push_back(Model::SpanX{ cur, s.Left() - 1 });
+						}
+						cur = std::max(cur, s.Right() + 1);
+					}
+
+					if (cur <= region.Right()) {
+						free.push_back(Model::SpanX{ cur, region.Right() });
+					}
+
+					return free;
+				}
+
+
+				// Сливает перекрывающиеся или примыкающие интервалы на одной строке:
+				// [3..8], [7..10] → [3..10]. Это делает карту skip компактной и
+				// уменьшает количество прыжков токенайзера.
 				static void MergeRowSpans(std::vector<Model::SpanX>& spans) {
 					std::sort(
 						spans.begin(),
 						spans.end(),
 						[](const Model::SpanX& a, const Model::SpanX& b) {
-							if (a.x1 != b.x1) {
-								return a.x1 < b.x1;
+							if (a.Left() != b.Left()) {
+								return a.Left() < b.Left();
 							}
-							else {
-								return a.x2 < b.x2;
-							}
+							return a.Right() < b.Right();
 						}
 					);
 
@@ -453,81 +348,38 @@ namespace AsciiMathParser {
 
 					for (const auto& s : spans) {
 						if (!cur.has_value()) {
-							cur = std::make_pair(s.x1, s.x2);
+							cur = std::make_pair(s.Left(), s.Right());
 						}
 						else {
 							auto& [cx1, cx2] = *cur;
-							if (s.x1 <= cx2 + 1) {
-								if (s.x2 > cx2) {
-									cx2 = s.x2;
-								}
+							if (s.Left() <= cx2 + 1) {
+								if (s.Right() > cx2) cx2 = s.Right();
 							}
 							else {
 								merged.push_back(Model::SpanX{ cx1, cx2 });
-								cur = std::make_pair(s.x1, s.x2);
+								cur = std::make_pair(s.Left(), s.Right());
 							}
 						}
 					}
-
 					if (cur.has_value()) {
 						merged.push_back(Model::SpanX{ cur->first, cur->second });
 					}
-
 					spans = std::move(merged);
 				}
 
 
-				//  Если текущая позиция x находится внутри любого интервала skip,
-				//  перепрыгивает на первую «безопасную» колонку справа (x = span.x2 + 1).
-				static void JumpOverSkips(
-					bool hasSpans,
-					const std::vector<Model::SpanX>* spans,
-					int& x
-				) {
-					if (!hasSpans) {
-						return;
-					}
-
-					for (const auto& s : *spans) {
-						if (x >= s.x1 && x <= s.x2) {
-							x = s.x2 + 1;
-							return;
-						}
-					}
-				}
-
-
-				//  Проверяет, лежит ли x внутри какого-либо интервала skip.
-				//  Используется для обрыва токена, если в середине встретилась «стена».
-				static bool IsInsideAnySpan(
-					bool hasSpans,
-					const std::vector<Model::SpanX>* spans,
-					int x
-				) {
-					if (!hasSpans) {
-						return false;
-					}
-
-					for (const auto& s : *spans) {
-						if (x >= s.x1 && x <= s.x2) {
-							return true;
-						}
-					}
-					return false;
-				}
-
 				// Проверка: бар целиком «лежит» в регионе r
 				static bool IsBarInsideRegion(
-					const Detect::FractionBar& b,
-					const Model::Region& r
+					const Detect::FractionBar& bar,
+					const Model::Region& region
 				) {
-					if (!r.ContainsY(b.barRegion.y)) {
+					if (!region.ContainsY(bar.barRegion.y)) {
 						return false;
 					}
-					if (!r.ContainsX(b.barRegion.cols.x1)) {
+					if (!region.ContainsX(bar.barRegion.Left())) {
 						return false;
 					}
-					if (!r.ContainsX(b.barRegion.cols.x2)) {
+					if (!region.ContainsX(bar.barRegion.Right())) {
 						return false;
 					}
 					return true;

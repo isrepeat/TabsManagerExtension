@@ -12,6 +12,14 @@ namespace AsciiMathParser {
 				int x1;
 				int x2;
 
+				int Left() const {
+					return this->x1;
+				}
+
+				int Right() const {
+					return this->x2;
+				}
+
 				// Возвращает ширину диапазона (в символах).
 				int Width() const {
 					return this->x2 - this->x1 + 1;
@@ -40,6 +48,14 @@ namespace AsciiMathParser {
 				int y1;
 				int y2;
 
+				int Top() const {
+					return this->y1;
+				}
+
+				int Bottom() const {
+					return this->y2;
+				}
+
 				// Возвращает высоту диапазона (в строках).
 				int Height() const {
 					return this->y2 - this->y1 + 1;
@@ -61,6 +77,22 @@ namespace AsciiMathParser {
 			struct Region {
 				SpanX cols;
 				SpanY rows;
+
+				int Left() const { 
+					return this->cols.Left();
+				}
+
+				int Right() const {
+					return this->cols.Right();
+				}
+
+				int Top() const { 
+					return this->rows.Top();
+				}
+
+				int Bottom() const { 
+					return this->rows.Bottom();
+				}
 
 				// Ширина области (в символах).
 				int Width() const {
@@ -105,6 +137,14 @@ namespace AsciiMathParser {
 					, cols{ cols } {
 				}
 
+				int Left() const {
+					return this->cols.Left();
+				}
+
+				int Right() const {
+					return this->cols.Right();
+				}
+
 				int Width() const {
 					return this->cols.Width();
 				}
@@ -132,6 +172,14 @@ namespace AsciiMathParser {
 				)
 					: x{ x }
 					, rows{ rows } {
+				}
+
+				int Top() const {
+					return this->rows.Top();
+				}
+
+				int Bottom() const {
+					return this->rows.Bottom();
 				}
 
 				int Height() const {

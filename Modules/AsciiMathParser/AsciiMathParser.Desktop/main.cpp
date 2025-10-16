@@ -327,8 +327,8 @@ int main() {
 
 	std::cout << std::format("fractionBars count: {}\n", fractionBars.size());
 
-	std::cout << "\n==== Visual (outer num/den) ====\n";
-	Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
+	//std::cout << "\n==== Visual (outer num/den) ====\n";
+	//Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
 
 	// -------- Parse (RegionParser) --------
 	Parse::RegionParser regionParser{};

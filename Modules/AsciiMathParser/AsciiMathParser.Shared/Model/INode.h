@@ -28,8 +28,8 @@ namespace AsciiMathParser {
 			public:
 				Symbol(
 					std::string content,
-					int y,
-					int x
+					int x,
+					int y
 				)
 					: content{ std::move(content) }
 					, region{
