@@ -15,40 +15,90 @@
 
 
 /*
-	//math_start
-	Some comment...
-	
-	| 				   2y                   |
-	|         a + b + ====                  |
-	| 				   x                u   |    |  dy  |
-	| L =  ========================= + ==== | +  | ==== |
-	| 					2k              w   |    |  dx  |
-	| 			 z  +  ====                 |
-	| 					c                   |
 
-	//math_end
+									   e
+								2y + =====				[bar1]
+									   2
+					  a + b + ============ * k			[bar2]
+									n
+				L =  =============================		[bar3]
+								 z
+
+1)
+
+			  Num = "e" (raw text)
+			/
+	  Frac_1
+			\
+			  Den = "2" (raw text)
+
+							e
+			  Num = "2y + ====" (raw text)
+			/               2
+	  Frac_2
+			\
+			  Den = "n" (raw text)
+
+									 e
+							  2y + =====
+									 2
+			  Num = "a + b + =========== * k" (raw text)
+			/ 		              n
+	  Frac_3
+			\
+			  Den = "z" (raw text)
+
+
+2)
+
+			  Num = { Symbol{e} }
+			/
+	  Frac_1
+			\
+			  Den = { Symbol{2} }
+
+
+			  Num = { Symbol{2y}, Symbol{+}, Frac{Num: Symbol{e}; Den: Symbol{2}} }
+			/
+	  Frac_2
+			\
+			  Den = { Symbol{n} }
+
+
+			  Num = { Symbol{a}, Symbol{+}, Symbol{b}, Frac{Num: Frac{Num: Symbol{e}; Den: Symbol{2}}; Den: Symbol{n}}, Symbol{*}, Symbol{k} }
+			/
+	  Frac_3
+			\
+			  Den = { Symbol{z} }
+
 */
 
 
+enum class FormulaType {
+	FromulaFrac1 = 0,
+	FromulaFrac2,
+	FromulaFrac3,
+};
 
-//const std::string text =
-//"//math_start                   \n"
-//"                               \n"
-//"            a + b              \n"
-//"L =  ========================= \n"
-//"             z                 \n"
-//"//math_end                     \n";
+const std::map<FormulaType, std::string> formulaTexts = {
+	{ FormulaType::FromulaFrac1,
+	"//math_start                   \n"
+	"                               \n"
+	"            a + b              \n"
+	"L =  ========================= \n"
+	"             z                 \n"
+	"//math_end                     \n" },
 
-//const std::string text =
-//	"//math_start                   \n"
-//	"                    2y         \n"
-//	"          a + b + ======       \n"
-//	"                    n          \n"
-//	"L =  ========================= \n"
-//	"                z + h          \n"
-//	"//math_end                     \n";
+	{ FormulaType::FromulaFrac2,
+	"//math_start                   \n"
+	"                    2y         \n"
+	"          a + b + ======       \n"
+	"                    n          \n"
+	"L =  ========================= \n"
+	"                z + h          \n"
+	"//math_end                     \n" },
 
-const std::string text =
+	{ FormulaType::FromulaFrac3,
 	"//math_start                   \n"
 	"                    2y         \n"
 	"          a + b + ====== * k   \n"
@@ -57,7 +107,9 @@ const std::string text =
 	"                     e         \n"
 	"                z + ===        \n"
 	"                     2         \n"
-	"//math_end                     \n";
+	"//math_end                     \n" }
+};
+
 
 //const std::string text =
 //	"//math_start                           \n"
@@ -79,66 +131,6 @@ const std::string text =
 //	"λ̂ = ∏^{k-1}_{i=1}  =====================================================================  · (ŵ^{i-1}_{k})^2\n"
 //	"                                              x_{k}\n"
 //	"//math_end\n";
-
-
-/*
-
-                                       e
-							    2y + =====				[bar1]
-								       2
-					  a + b + ============ * k			[bar2]
-								    n
-				L =  =============================		[bar3]
-								 z
-
-1)                               
-				      		         
-              Num = "e" (raw text)
-			/
-      Frac_1
-			\
-			  Den = "2" (raw text)
-
-			                e
-			  Num = "2y + ====" (raw text)
-			/               2
-	  Frac_2
-			\
-			  Den = "n" (raw text)
-									 					 
-									 e
-							  2y + =====
-							         2
-              Num = "a + b + =========== * k" (raw text)
-			/ 		              n
-      Frac_3  					  
-			\
-              Den = "z" (raw text)
-
-				 
-2)
-
-			  Num = { Symbol{e} }
-			/
-	  Frac_1
-			\
-			  Den = { Symbol{2} }
-
-												   
-			  Num = { Symbol{2y}, Symbol{+}, Frac{Num: Symbol{e}; Den: Symbol{2}} }
-			/
-	  Frac_2
-			\
-			  Den = { Symbol{n} }
-
-
-			  Num = { Symbol{a}, Symbol{+}, Symbol{b}, Frac{Num: Frac{Num: Symbol{e}; Den: Symbol{2}}; Den: Symbol{n}}, Symbol{*}, Symbol{k} }
-			/
-      Frac_3
-			\
-			  Den = { Symbol{z} }
-
-*/
 
 
 namespace LocalHelpers {
@@ -169,22 +161,6 @@ namespace LocalHelpers {
 		// Если маркеры не найдены — возвращаем оригинал
 		return text;
 	}
-
-	//AsciiMathParser::Core::Model::Region WholeRegion(
-	//	const AsciiMathParser::Core::Model::AsciiGrid& grid
-	//) {
-	//	using namespace AsciiMathParser::Core::Model;
-
-	//	const int h = grid.Height();
-	//	const int w = grid.Width();
-
-	//	Region r{
-	//		SpanX{ 0, w > 0 ? (w - 1) : 0 },
-	//		SpanY{ 0, h > 0 ? (h - 1) : 0 }
-	//	};
-
-	//	return r;
-	//}
 
 	Model::Region WholeRegion(const Model::AsciiGrid& grid) {
 		return Model::Region{
@@ -306,7 +282,7 @@ namespace AsciiMathParser::Core {
 				}
 			}
 		}
-	} // namespace Dump
+	}
 }
 
 
@@ -315,7 +291,7 @@ int main() {
 	using namespace AsciiMathParser::Core;
 
 	const std::string mathBlock = LocalHelpers::ExtractMathBlock(
-		text
+		formulaTexts.at(FormulaType::FromulaFrac3)
 	);
 
 	std::cout << "==== Raw block ====\n";
@@ -335,15 +311,6 @@ int main() {
 		//std::cout << "\n==== Visual (outer num/den) ====\n";
 		//Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
 
-		//Parse::RegionParser regionParser{};
-
-		//auto astRootNodes = regionParser.ParseRegion(
-		//	grid,
-		//	whole,
-		//	fractionBars
-		//);
-
-		//features.push_back(std::make_unique<Parse::FractionFeature>(std::move(fractionBars)));
 		features.push_back(std::make_unique<Parse::FractionFeature>(fractionBars));
 	}
 

@@ -10,13 +10,13 @@
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Parse {
-			using FeatureChildId = std::uintptr_t; // фича сама решает, что класть (обычно индекс)
+			//using FeatureChildId = std::uintptr_t; // фича сама решает, что класть (обычно индекс)
 
 			struct PlannedChild {
 				const class IRegionFeature* owner;   // кто породил
 				Model::Region               bbox;    // общий бокс ребёнка
 				std::vector<Model::Region>  subregions; // куда рекурсить
-				FeatureChildId              id;      // feature-local ID (напр., индекс бара)
+				int              id;      // feature-local ID (напр., индекс бара)
 			};
 
 
@@ -33,14 +33,14 @@ namespace AsciiMathParser {
 				// Добавить пропуски только под КОНКРЕТНОГО ребёнка (полоса бара, окна и т.д.)
 				virtual void AppendSkips(
 					const Model::Region& currentRegion,
-					FeatureChildId id,
+					int id,
 					std::unordered_map<int, std::vector<Model::SpanX>>& skipByRow
 				) const = 0;
 
 				// Сконструировать финальный узел, получив уже распарсенные поддеревья
 				// subtrees.size() == subregions.size() из PlannedChild.
 				virtual std::unique_ptr<Model::INode> Assemble(
-					FeatureChildId id,
+					int id,
 					std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
 				) const = 0;
 			};

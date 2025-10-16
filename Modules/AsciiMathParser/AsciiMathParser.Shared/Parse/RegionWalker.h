@@ -21,142 +21,280 @@ namespace AsciiMathParser {
 					: features_{ std::move(features) } {
 				}
 
+				//std::vector<std::unique_ptr<Model::INode>> ParseRegion(
+				//	const Model::AsciiGrid& grid,
+				//	const Model::Region& region
+				//) const {
+				//	LOG_FUNCTION_SCOPE(
+				//		"ParseRegion(): bbox=[x:{}..{} y:{}..{}]",
+				//		region.Left(),
+				//		region.Right(),
+				//		region.Top(),
+				//		region.Bottom()
+				//	);
+
+				//	// 1) Сбор кандидатов от всех фич
+				//	std::vector<PlannedChild> all{};
+				//	for (const auto& f : this->features_) {
+				//		auto v = f->CollectChildren(grid, region);
+
+				//		LOG_DEBUG_D(
+				//			"feature {} -> {} candidates",
+				//			(const void*)f.get(),
+				//			(int)v.size()
+				//		);
+
+				//		for (const auto& c : v) {
+				//			LOG_DEBUG_D(
+				//				"  cand id={} bbox=[{}..{} x {}..{}]; subregions={}",
+				//				(unsigned long long)c.id,
+				//				c.bbox.Left(),
+				//				c.bbox.Right(),
+				//				c.bbox.Top(),
+				//				c.bbox.Bottom(),
+				//				(int)c.subregions.size()
+				//			);
+				//		}
+
+				//		for (auto& x : v) {
+				//			all.push_back(std::move(x));
+				//		}
+				//	}
+
+				//	// 2) Оставить только top-level
+				//	auto top = this->FilterTopLevel(all);
+
+				//	LOG_DEBUG_D(
+				//		"top-level count: {}",
+				//		(int)top.size()
+				//	);
+
+				//	for (const auto& c : top) {
+				//		LOG_DEBUG_D(
+				//			"  top id={} bbox=[{}..{} x {}..{}]",
+				//			(unsigned long long)c.id,
+				//			c.bbox.Left(),
+				//			c.bbox.Right(),
+				//			c.bbox.Top(),
+				//			c.bbox.Bottom()
+				//		);
+				//	}
+
+				//	// 3) Сформировать skip-карту под top-детей
+				//	std::unordered_map<int, std::vector<Model::SpanX>> skip{};
+				//	for (const auto& ch : top) {
+				//		ch.owner->AppendSkips(region, ch.id, skip);
+				//	}
+				//	for (auto& kv : skip) {
+				//		this->MergeRowSpans(kv.second);
+				//	}
+
+				//	LOG_DEBUG_D("skip map (merged):");
+				//	for (const auto& kv : skip) {
+				//		std::string line{};
+				//		line += std::format("  y={}: ", kv.first);
+				//		for (const auto& s : kv.second) {
+				//			line += std::format("[{}..{}] ", s.Left(), s.Right());
+				//		}
+				//		LOG_DEBUG_D("{}", line);
+				//	}
+
+				//	// 4) Рекурсивно собрать поддеревья и «собрать» узлы у фичи
+				//	std::vector<std::unique_ptr<Model::INode>> featureNodes{};
+				//	featureNodes.reserve(top.size());
+
+				//	for (const auto& ch : top) {
+				//		LOG_DEBUG_D(
+				//			"assemble child id={} subregions={}",
+				//			(unsigned long long)ch.id,
+				//			(int)ch.subregions.size()
+				//		);
+
+				//		std::vector<std::vector<std::unique_ptr<Model::INode>>> subtrees{};
+				//		subtrees.reserve(ch.subregions.size());
+
+				//		for (const auto& sub : ch.subregions) {
+				//			LOG_DEBUG_D(
+				//				"  recurse sub=[{}..{} x {}..{}]",
+				//				sub.Left(),
+				//				sub.Right(),
+				//				sub.Top(),
+				//				sub.Bottom()
+				//			);
+
+				//			auto subNodes = this->ParseRegion(
+				//				grid,
+				//				sub
+				//			);
+
+				//			LOG_DEBUG_D(
+				//				"  sub parsed: {} nodes",
+				//				(int)subNodes.size()
+				//			);
+
+				//			subtrees.push_back(std::move(subNodes));
+				//		}
+				//		featureNodes.push_back(
+				//			ch.owner->Assemble(ch.id, std::move(subtrees))
+				//		);
+				//	}
+
+				//	// 5) Оставшееся → символы
+				//	auto symbolNodes = this->TokenizeToSymbols(grid, region, skip);
+
+				//	// 6) Слить по порядку чтения
+				//	auto merged = this->MergeByReadingOrder(
+				//		std::move(featureNodes),
+				//		std::move(symbolNodes)
+				//	);
+
+				//	LOG_DEBUG_D(
+				//		"merged nodes: {}",
+				//		(int)merged.size()
+				//	);
+
+				//	return merged;
+				//}
+
+				// Старый публичный вход делегирует на новый с пустым «наследием»
 				std::vector<std::unique_ptr<Model::INode>> ParseRegion(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region
 				) const {
-					LOG_FUNCTION_SCOPE(
-						"ParseRegion(): bbox=[x:{}..{} y:{}..{}]",
+					std::unordered_map<int, std::vector<Model::SpanX>> empty{};
+					return this->ParseRegion(grid, region, empty);
+				}
+
+			private:
+				// Новый приватный метод с унаследованными skip’ами
+				std::vector<std::unique_ptr<Model::INode>> ParseRegion(
+					const Model::AsciiGrid& grid,
+					const Model::Region& region,
+					const std::unordered_map<int, std::vector<Model::SpanX>>& inheritedSkip
+				) const {
+					LOG_DEBUG_D(
+						"@@@ ParseRegion(): bbox=[x:{}..{} y:{}..{}]",
 						region.Left(),
 						region.Right(),
 						region.Top(),
 						region.Bottom()
 					);
 
-					// 1) Сбор кандидатов от всех фич
-					std::vector<PlannedChild> all{};
-					for (const auto& f : this->features_) {
-						auto v = f->CollectChildren(grid, region);
-
-						LOG_DEBUG_D(
-							"feature {} -> {} candidates",
-							(const void*)f.get(),
-							(int)v.size()
-						);
-
-						for (const auto& c : v) {
-							LOG_DEBUG_D(
-								"  cand id={} bbox=[{}..{} x {}..{}]; subregions={}",
-								(unsigned long long)c.id,
-								c.bbox.Left(),
-								c.bbox.Right(),
-								c.bbox.Top(),
-								c.bbox.Bottom(),
-								(int)c.subregions.size()
-							);
-						}
-
-						for (auto& x : v) {
-							all.push_back(std::move(x));
+					// 1) Сбор кандидатов от всех фич.
+					std::vector<PlannedChild> allCandidates{};
+					for (const auto& featurePtr : this->features_) {
+						auto cands = featurePtr->CollectChildren(grid, region);
+						for (auto& c : cands) {
+							allCandidates.push_back(std::move(c));
 						}
 					}
 
-					// 2) Оставить только top-level
-					auto top = this->FilterTopLevel(all);
-
-					LOG_DEBUG_D(
-						"top-level count: {}",
-						(int)top.size()
-					);
-
-					for (const auto& c : top) {
+					// 2) Top-level фильтрация.
+					auto top = this->FilterTopLevel(allCandidates);
+					LOG_DEBUG_D("top-level count: {}", static_cast<int>(top.size()));
+					for (const auto& t : top) {
 						LOG_DEBUG_D(
 							"  top id={} bbox=[{}..{} x {}..{}]",
-							(unsigned long long)c.id,
-							c.bbox.Left(),
-							c.bbox.Right(),
-							c.bbox.Top(),
-							c.bbox.Bottom()
+							static_cast<unsigned long long>(t.id),
+							t.bbox.Left(),
+							t.bbox.Right(),
+							t.bbox.Top(),
+							t.bbox.Bottom()
 						);
 					}
 
-					// 3) Сформировать skip-карту под top-детей
-					std::unordered_map<int, std::vector<Model::SpanX>> skip{};
+					// 3) Локальная skip-карта = наследуемая + полосы баров этого уровня.
+					auto skip = inheritedSkip;
 					for (const auto& ch : top) {
-						ch.owner->AppendSkips(region, ch.id, skip);
+						ch.owner->AppendSkips(
+							region,
+							ch.id,
+							skip
+						);
 					}
 					for (auto& kv : skip) {
 						this->MergeRowSpans(kv.second);
 					}
 
-					LOG_DEBUG_D("skip map (merged):");
-					for (const auto& kv : skip) {
-						std::string line{};
-						line += std::format("  y={}: ", kv.first);
-						for (const auto& s : kv.second) {
-							line += std::format("[{}..{}] ", s.Left(), s.Right());
-						}
-						LOG_DEBUG_D("{}", line);
-					}
-
-					// 4) Рекурсивно собрать поддеревья и «собрать» узлы у фичи
+					// 4) Рекурсия в подрегионы (skip пробрасываем как есть).
 					std::vector<std::unique_ptr<Model::INode>> featureNodes{};
 					featureNodes.reserve(top.size());
 
 					for (const auto& ch : top) {
-						LOG_DEBUG_D(
-							"assemble child id={} subregions={}",
-							(unsigned long long)ch.id,
-							(int)ch.subregions.size()
-						);
-
 						std::vector<std::vector<std::unique_ptr<Model::INode>>> subtrees{};
 						subtrees.reserve(ch.subregions.size());
 
 						for (const auto& sub : ch.subregions) {
-							LOG_DEBUG_D(
-								"  recurse sub=[{}..{} x {}..{}]",
-								sub.Left(),
-								sub.Right(),
-								sub.Top(),
-								sub.Bottom()
-							);
-
 							auto subNodes = this->ParseRegion(
 								grid,
-								sub
+								sub,
+								skip
 							);
-
-							LOG_DEBUG_D(
-								"  sub parsed: {} nodes",
-								(int)subNodes.size()
-							);
-
 							subtrees.push_back(std::move(subNodes));
 						}
+
 						featureNodes.push_back(
-							ch.owner->Assemble(ch.id, std::move(subtrees))
+							ch.owner->Assemble(
+								ch.id,
+								std::move(subtrees)
+							)
 						);
 					}
 
-					// 5) Оставшееся → символы
-					auto symbolNodes = this->TokenizeToSymbols(grid, region, skip);
+					// 4.5) Занять регионы собранных узлов на текущем уровне, чтобы не было «хвостов».
+					for (const auto& nodePtr : featureNodes) {
+						const Model::Region r = nodePtr->GetRegion();
+						AddRegionToSkip(region, r, skip);
+					}
+					for (auto& kv : skip) {
+						this->MergeRowSpans(kv.second);
+					}
 
-					// 6) Слить по порядку чтения
+					// 5) Добираем оставшиеся символы (уже с учётом занятых регионов).
+					auto symbolNodes = this->TokenizeToSymbols(
+						grid,
+						region,
+						skip
+					);
+
+					// 6) Слияние по порядку чтения.
 					auto merged = this->MergeByReadingOrder(
 						std::move(featureNodes),
 						std::move(symbolNodes)
 					);
 
 					LOG_DEBUG_D(
-						"merged nodes: {}",
-						(int)merged.size()
+						"@@@ <= ParseRegion(): bbox=[x:{}..{} y:{}..{}]",
+						region.Left(),
+						region.Right(),
+						region.Top(),
+						region.Bottom()
 					);
 
 					return merged;
 				}
 
-			private:
+
+				// Хелпер: добавить регион r в skip с клиппингом по regionCurrent.
+				static void AddRegionToSkip(
+					const Model::Region& regionCurrent,
+					const Model::Region& r,
+					std::unordered_map<int, std::vector<Model::SpanX>>& skipMap
+				) {
+					const int y1 = std::max(regionCurrent.Top(), r.Top());
+					const int y2 = std::min(regionCurrent.Bottom(), r.Bottom());
+
+					for (int y = y1; y <= y2; ++y) {
+						const int left = std::max(regionCurrent.Left(), r.Left());
+						const int right = std::min(regionCurrent.Right(), r.Right());
+
+						if (left <= right) {
+							skipMap[y].push_back(Model::SpanX{ left, right });
+						}
+					}
+				}
+
+
 				std::vector<std::unique_ptr<Model::INode>> TokenizeToSymbols(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region,

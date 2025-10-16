@@ -83,7 +83,7 @@ namespace AsciiMathParser {
 								b.denRegion
 							),
 							.subregions = { b.numRegion, b.denRegion },
-							.id = static_cast<FeatureChildId>(idx)
+							.id = static_cast<int>(idx)
 						};
 
 						out.push_back(std::move(ch));
@@ -101,81 +101,64 @@ namespace AsciiMathParser {
 				}
 
 
+				// В skip добавляем ТОЛЬКО линию бара. Num/Den не трогаем.
 				void AppendSkips(
-					const Model::Region& cur,
-					FeatureChildId id,
-					std::unordered_map<int, std::vector<Model::SpanX>>& skip
-				) const override {
-					const auto& b = this->bars_[static_cast<std::size_t>(id)];
+					const Model::Region& regionCurrent,
+					const int candidateId,
+					std::unordered_map<int, std::vector<Model::SpanX>>& skipMap
+				) const {
+					const auto idx = static_cast<size_t>(candidateId);
+					const auto& bar = this->bars_.at(idx);
 
-					auto clipRegion = [&](
-						const Model::Region& r,
-						const char* tag
-						) {
-							for (int y = r.Top(); y <= r.Bottom(); ++y) {
-								if (!cur.ContainsY(y)) {
-									continue;
-								}
-								const int L = std::max(cur.Left(), r.Left());
-								const int R = std::min(cur.Right(), r.Right());
-								if (L <= R) {
-									skip[y].push_back(Model::SpanX{ L, R });
-									LOG_DEBUG_D(
-										"  skip {} y={} [{}..{}]",
-										tag,
-										y,
-										L,
-										R
-									);
-								}
-							}
-						};
-
-					// полоса бара
-					if (cur.ContainsY(b.barRegion.y)) {
-						const int L = std::max(cur.Left(), b.barRegion.Left());
-						const int R = std::min(cur.Right(), b.barRegion.Right());
-						if (L <= R) {
-							skip[b.barRegion.y].push_back(Model::SpanX{ L, R });
-							LOG_DEBUG_D(
-								"  skip bar y={} [{}..{}]",
-								b.barRegion.y,
-								L,
-								R
-							);
-						}
+					const int y = bar.barRegion.y;
+					if (!regionCurrent.ContainsY(y)) {
+						return;
 					}
 
-					clipRegion(
-						b.numRegion,
-						"num"
-					);
-					clipRegion(
-						b.denRegion,
-						"den"
-					);
+					const int left = std::max(regionCurrent.Left(), bar.barRegion.Left());
+					const int right = std::min(regionCurrent.Right(), bar.barRegion.Right());
+
+					if (left <= right) {
+						skipMap[y].push_back(Model::SpanX{ left, right });
+
+						LOG_DEBUG_D(
+							"  skip bar y={} [{}..{}]",
+							y,
+							left,
+							right
+						);
+					}
 				}
 
-
+				// Собираем Fraction-узел: регион узла = union(bar ∪ num ∪ den).
 				std::unique_ptr<Model::INode> Assemble(
-					FeatureChildId id,
+					const int candidateId,
 					std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
 				) const override {
-					const auto& b = this->bars_[static_cast<std::size_t>(id)];
+					const auto idx = static_cast<size_t>(candidateId);
+					const auto& b = this->bars_.at(idx);
 
-					LOG_DEBUG_D(
-						"[FractionFeature] Assemble id={} (Num={}, Den={})",
-						(unsigned long long)id,
-						(int)subtrees[0].size(),
-						(int)subtrees[1].size()
-					);
+					auto numGroup = Model::NodesGroup{
+						std::move(subtrees.at(0))
+					};
+					auto denGroup = Model::NodesGroup{
+						std::move(subtrees.at(1))
+					};
+
+					const Model::Region fractionRegionUnion =
+						Model::Geometry::UnionRegions(
+							b.barRegion.ToRegion(),
+							b.numRegion,
+							b.denRegion
+						);
 
 					return std::make_unique<Model::Fraction>(
-						Model::NodesGroup{ std::move(subtrees[0]) },
-						Model::NodesGroup{ std::move(subtrees[1]) },
-						b.barRegion.ToRegion()
+						std::move(numGroup),
+						std::move(denGroup),
+						fractionRegionUnion
 					);
 				}
+
 
 			private:
 				static bool IsBarInside(
