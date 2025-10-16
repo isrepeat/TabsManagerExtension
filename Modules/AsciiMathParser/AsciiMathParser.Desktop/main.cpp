@@ -1,16 +1,13 @@
 #include <Helpers/Text.h>
 
-//#include "Layout/LayoutBuilder.h"
-//#include "Layout/LayoutGraph.h"
-//#include "Detect/FractionBarDetector.h"
-//#include "Detect/IFeatureDetector.h"
-//#include "Model/Geometry.h"
-//#include "Model/Grid.h"
-
-#include "Model/Grid.h"
 #include "Detect/FractionBarDetector.h"
-#include "Parse/RegionParser.h"
+#include "Parse/FractionFeature.h"
+#include "Parse/IRegionFeature.h"
+//#include "Parse/RegionParser.h"
+#include "Parse/RegionWalker.h"
 #include "Model/INode.h"
+#include "Model/Grid.h"
+
 
 #include <iostream>
 #include <format>
@@ -145,6 +142,8 @@ const std::string text =
 
 
 namespace LocalHelpers {
+	using namespace AsciiMathParser::Core;
+
 	std::string ExtractMathBlock(const std::string& text) {
 		// 1. Шаблон: ищем //math_start ... //math_end
 		static const std::regex pattern(
@@ -171,20 +170,27 @@ namespace LocalHelpers {
 		return text;
 	}
 
-	AsciiMathParser::Core::Model::Region WholeRegion(
-		const AsciiMathParser::Core::Model::AsciiGrid& grid
-	) {
-		using namespace AsciiMathParser::Core::Model;
+	//AsciiMathParser::Core::Model::Region WholeRegion(
+	//	const AsciiMathParser::Core::Model::AsciiGrid& grid
+	//) {
+	//	using namespace AsciiMathParser::Core::Model;
 
-		const int h = grid.Height();
-		const int w = grid.Width();
+	//	const int h = grid.Height();
+	//	const int w = grid.Width();
 
-		Region r{
-			SpanX{ 0, w > 0 ? (w - 1) : 0 },
-			SpanY{ 0, h > 0 ? (h - 1) : 0 }
+	//	Region r{
+	//		SpanX{ 0, w > 0 ? (w - 1) : 0 },
+	//		SpanY{ 0, h > 0 ? (h - 1) : 0 }
+	//	};
+
+	//	return r;
+	//}
+
+	Model::Region WholeRegion(const Model::AsciiGrid& grid) {
+		return Model::Region{
+			Model::SpanX{ 0, grid.Width() - 1 },
+			Model::SpanY{ 0, grid.Height() - 1 }
 		};
-
-		return r;
 	}
 }
 
@@ -278,7 +284,7 @@ namespace AsciiMathParser::Core {
 			int depth = 0
 		) {
 			for (const auto& n : nodes) {
-				if (const auto* f = dynamic_cast<const Model::Frac*>(n.get())) {
+				if (const auto* f = dynamic_cast<const Model::Fraction*>(n.get())) {
 					Dump::Indent(depth);
 					std::cout << "[Frac]\n";
 
@@ -316,171 +322,41 @@ int main() {
 	std::cout << mathBlock << "\n\n";
 
 	// Grid
-	Model::AsciiGrid grid{
-		mathBlock
-	};
+	auto grid = Model::AsciiGrid{ mathBlock };
+	auto wholeRegion = LocalHelpers::WholeRegion(grid);
 
-	// -------- Detect (бары уже с готовыми num/den Region внутри Detect::FractionBar) --------
-	Detect::FractionBarDetector barDetector{ grid };
+	auto features = std::vector<std::unique_ptr<Parse::IRegionFeature>>{};
+	{
+		Detect::FractionBarDetector barDetector{ grid };
+		std::vector<Detect::FractionBar> fractionBars = barDetector.DetectBars();
 
-	const auto fractionBars = barDetector.DetectBars();
+		std::cout << std::format("fractionBars count: {}\n", fractionBars.size());
 
-	std::cout << std::format("fractionBars count: {}\n", fractionBars.size());
+		//std::cout << "\n==== Visual (outer num/den) ====\n";
+		//Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
 
-	//std::cout << "\n==== Visual (outer num/den) ====\n";
-	//Dump::PrintGridWithOuterBarHighlight(grid, fractionBars, 1, 236, 236);
+		//Parse::RegionParser regionParser{};
 
-	// -------- Parse (RegionParser) --------
-	Parse::RegionParser regionParser{};
+		//auto astRootNodes = regionParser.ParseRegion(
+		//	grid,
+		//	whole,
+		//	fractionBars
+		//);
 
-	const auto whole = LocalHelpers::WholeRegion(
-		grid
-	);
+		features.push_back(std::make_unique<Parse::FractionFeature>(std::move(fractionBars)));
+	}
 
-	auto ast = regionParser.ParseRegion(
+	Parse::RegionWalker regionWalker{ std::move(features) };
+
+	auto astRootNodes = regionWalker.ParseRegion(
 		grid,
-		whole,
-		fractionBars
+		wholeRegion
 	);
 
 	std::cout << "\n==== AST ====\n";
-	Dump::DumpNodes(ast, 0);
+	Dump::DumpNodes(astRootNodes, 0);
 
 	std::cout << "\n";
 	system("pause");
 	return 0;
 }
-
-
-
-//
-//
-//int main() {
-//	const std::string mathBlock = LocalHelpers::ExtractMathBlock(text);
-//
-//	AsciiMathParser::Core::Model::AsciiGrid grid{
-//		mathBlock
-//	};
-//
-//	// -------- Detect --------
-//	AsciiMathParser::Core::Detect::FractionBarDetector barDetector{};
-//	const auto features = barDetector.Detect(
-//		grid
-//	);
-//
-//	int barCount = 0;
-//	for (const auto& f : features) {
-//		if (f.featureKind == "bar") {
-//			++barCount;
-//		}
-//	}
-//
-//	std::cout << std::format("Features total: {}\n", features.size());
-//	std::cout << std::format("  bars: {}\n", barCount);
-//
-//	for (const auto& f : features) {
-//		if (f.featureKind == "bar") {
-//			std::cout << std::format("    bar: y={}, x=({}..{})\n",
-//				f.bandY,
-//				f.bandX1,
-//				f.bandX2
-//			);
-//		}
-//	}
-//
-//	// -------- Layout --------
-//	AsciiMathParser::Core::Layout::LayoutBuilderOptions lbOpts{};
-//	AsciiMathParser::Core::Layout::LayoutBuilder layoutBuilder{
-//		lbOpts
-//	};
-//
-//	auto graph = layoutBuilder.Build(
-//		grid,
-//		features
-//	);
-//
-//	std::cout << std::format("\nLayoutGraph:\n  nodes: {}\n  edges: {}\n",
-//		graph.Nodes().size(),
-//		graph.Edges().size()
-//	);
-//
-//	// Выведем все узлы с их ролями и bbox
-//	for (const auto& n : graph.Nodes()) {
-//		// Форматированный вывод с фиксированной шириной
-//		std::cout << std::format(
-//			"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
-//			n.id | H::Text::Color::Gray,
-//			n.role | H::Text::Color::BrightBlue,
-//			n.region.rows.y1,
-//			n.region.rows.y2,
-//			n.region.cols.x1,
-//			n.region.cols.x2,
-//			"", // просто отступ для выравнивания колонок
-//			n.content | H::Text::Color::Green
-//		);
-//	}
-//
-//
-//	// Для каждой «bar» покажем соседей Above/Below (что над/под полосой)
-//	using RelKind = AsciiMathParser::Core::Layout::RelKind;
-//
-//	const auto barNodes = graph.FindByRole(
-//		"bar"
-//	);
-//
-//	for (const auto nodeId : barNodes) {
-//		std::cout << std::format("\nbar node#{} relations:\n", nodeId);
-//
-//		const auto aboveNeighborsIds = graph.Neighbors(
-//			nodeId,
-//			RelKind::Above
-//		);
-//
-//		const auto belowNeighborsIds = graph.Neighbors(
-//			nodeId,
-//			RelKind::Below
-//		);
-//
-//		if (!aboveNeighborsIds.empty()) {
-//			std::cout << "  Above:\n";
-//
-//			for (const auto aboveNeighborsId : aboveNeighborsIds) {
-//				const auto& aboveNode = graph.Nodes()[static_cast<std::size_t>(aboveNeighborsId)];
-//				std::cout << std::format(
-//					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
-//					aboveNode.id | H::Text::Color::Gray,
-//					aboveNode.role | H::Text::Color::BrightBlue,
-//					aboveNode.region.rows.y1,
-//					aboveNode.region.rows.y2,
-//					aboveNode.region.cols.x1,
-//					aboveNode.region.cols.x2,
-//					"", // просто отступ для выравнивания колонок
-//					aboveNode.content | H::Text::Color::Green
-//				);
-//			}
-//		}
-//
-//		if (!belowNeighborsIds.empty()) {
-//			std::cout << "  Below:\n";
-//
-//			for (const auto belowNeighborsId : belowNeighborsIds) {
-//				const auto& belowNode = graph.Nodes()[static_cast<std::size_t>(belowNeighborsId)];
-//				std::cout << std::format(
-//					"  node#{:02}: role='{:10}'  rows=[{:2}..{:2}]  cols=[{:2}..{:2}]  {:<5} content='{}'\n",
-//					belowNode.id | H::Text::Color::Gray,
-//					belowNode.role | H::Text::Color::BrightBlue,
-//					belowNode.region.rows.y1,
-//					belowNode.region.rows.y2,
-//					belowNode.region.cols.x1,
-//					belowNode.region.cols.x2,
-//					"", // просто отступ для выравнивания колонок
-//					belowNode.content | H::Text::Color::Green
-//				);
-//			}
-//		}
-//	}
-//
-//	std::cout << "\n";
-//	system("pause");
-//	return 0;
-//}

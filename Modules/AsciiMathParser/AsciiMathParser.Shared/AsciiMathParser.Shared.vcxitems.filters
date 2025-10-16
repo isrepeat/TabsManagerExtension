@@ -41,5 +41,23 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionParser.h">
       <Filter>Sources\Parse</Filter>
     </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Fraction.h">
+      <Filter>Sources\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Symbol.h">
+      <Filter>Sources\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\IRegionWalker.h">
+      <Filter>Sources\Parse</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionWalker.h">
+      <Filter>Sources\Parse</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\FractionFeature.h">
+      <Filter>Sources\Parse</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\IRegionFeature.h">
+      <Filter>Sources\Parse</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

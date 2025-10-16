@@ -1,7 +1,8 @@
 #pragma once
 #include "../Detect/FractionBarDetector.h"
 #include "../Model/Geometry.h"
-#include "../Model/INode.h"
+#include "../Model/Fraction.h"
+#include "../Model/Symbol.h"
 #include "../Model/Grid.h"
 #include <unordered_set>
 #include <unordered_map>
@@ -30,7 +31,7 @@ namespace AsciiMathParser {
 					for (const auto& b : children) {
 						auto numNodes = this->ParseRegion(grid, b.numRegion, bars);
 						auto denNodes = this->ParseRegion(grid, b.denRegion, bars);
-						fracNodes.push_back(std::make_unique<Model::Frac>(
+						fracNodes.push_back(std::make_unique<Model::Fraction>(
 							Model::NodesGroup{ std::move(numNodes) },
 							Model::NodesGroup{ std::move(denNodes) },
 							b.barRegion.ToRegion()
