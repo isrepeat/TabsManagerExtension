@@ -18,7 +18,7 @@ namespace AsciiMathParser {
 				}
 
 
-				std::vector<PlannedChild> CollectChildren(
+				std::vector<Candidate> CollectChildren(
 					const Model::AsciiGrid&,
 					const Model::Region& region
 				) const override {
@@ -62,7 +62,7 @@ namespace AsciiMathParser {
 						(int)topIdx.size()
 					);
 
-					std::vector<PlannedChild> out{};
+					std::vector<Candidate> out{};
 					out.reserve(topIdx.size());
 
 					for (auto idx : topIdx) {
@@ -75,22 +75,22 @@ namespace AsciiMathParser {
 							b.denRegion.Left(), b.denRegion.Right(), b.denRegion.Top(), b.denRegion.Bottom()
 						);
 
-						PlannedChild ch{
+						Candidate ch{
 							.owner = this,
+							.id = static_cast<int>(idx),
 							.bbox = Model::Geometry::UnionRegions(
 								b.barRegion.ToRegion(),
 								b.numRegion,
 								b.denRegion
 							),
-							.subregions = { b.numRegion, b.denRegion },
-							.id = static_cast<int>(idx)
+							.subregions = { b.numRegion, b.denRegion }
 						};
 
 						out.push_back(std::move(ch));
 					}
 					std::sort(
 						out.begin(), out.end(),
-						[](const PlannedChild& a, const PlannedChild& b) {
+						[](const Candidate& a, const Candidate& b) {
 							if (a.bbox.Left() != b.bbox.Left()) {
 								return a.bbox.Left() < b.bbox.Left();
 							}
@@ -104,48 +104,38 @@ namespace AsciiMathParser {
 				// В skip добавляем ТОЛЬКО линию бара. Num/Den не трогаем.
 				void AppendSkips(
 					const Model::Region& regionCurrent,
-					const int candidateId,
+					int candidateId,
 					std::unordered_map<int, std::vector<Model::SpanX>>& skipMap
-				) const {
+				) const override {
 					const auto idx = static_cast<size_t>(candidateId);
-					const auto& bar = this->bars_.at(idx);
+					const auto& b = this->bars_.at(idx);
 
-					const int y = bar.barRegion.y;
+					const int y = b.barRegion.y;
 					if (!regionCurrent.ContainsY(y)) {
 						return;
 					}
 
-					const int left = std::max(regionCurrent.Left(), bar.barRegion.Left());
-					const int right = std::min(regionCurrent.Right(), bar.barRegion.Right());
+					const int left = std::max(regionCurrent.Left(), b.barRegion.Left());
+					const int right = std::min(regionCurrent.Right(), b.barRegion.Right());
 
 					if (left <= right) {
 						skipMap[y].push_back(Model::SpanX{ left, right });
-
-						LOG_DEBUG_D(
-							"  skip bar y={} [{}..{}]",
-							y,
-							left,
-							right
-						);
+						LOG_DEBUG_D("  skip bar y={} [{}..{}]", y, left, right);
 					}
 				}
 
 				// Собираем Fraction-узел: регион узла = union(bar ∪ num ∪ den).
 				std::unique_ptr<Model::INode> Assemble(
-					const int candidateId,
+					int candidateId,
 					std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
 				) const override {
 					const auto idx = static_cast<size_t>(candidateId);
 					const auto& b = this->bars_.at(idx);
 
-					auto numGroup = Model::NodesGroup{
-						std::move(subtrees.at(0))
-					};
-					auto denGroup = Model::NodesGroup{
-						std::move(subtrees.at(1))
-					};
+					auto numGroup = Model::NodesGroup{ std::move(subtrees.at(0)) };
+					auto denGroup = Model::NodesGroup{ std::move(subtrees.at(1)) };
 
-					const Model::Region fractionRegionUnion =
+					const Model::Region unionRegion =
 						Model::Geometry::UnionRegions(
 							b.barRegion.ToRegion(),
 							b.numRegion,
@@ -155,10 +145,9 @@ namespace AsciiMathParser {
 					return std::make_unique<Model::Fraction>(
 						std::move(numGroup),
 						std::move(denGroup),
-						fractionRegionUnion
+						unionRegion
 					);
 				}
-
 
 			private:
 				static bool IsBarInside(
@@ -171,8 +160,7 @@ namespace AsciiMathParser {
 				}
 
 			private:
-				//const std::vector<Detect::FractionBar>& bars_; // только ссылка, без кешей
-				const std::vector<Detect::FractionBar> bars_; // только ссылка, без кешей
+				const std::vector<Detect::FractionBar> bars_;
 			};
 		}
 	}
