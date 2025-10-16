@@ -10,41 +10,44 @@
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Parse {
-			//using FeatureChildId = std::uintptr_t; // фича сама решает, что класть (обычно индекс)
-
 			struct IRegionFeature;
 
-			// Один найденный «кандидат» фичи (дробь, корень и т.п.) внутри region.
-			struct Candidate final {
-				const IRegionFeature* owner = nullptr;  // владелец-детектор
-				int id = 0;								// индекс внутри детектора (например bars_[id])
-				Model::Region bbox;						// общий bouding-box
-				std::vector<Model::Region> subregions;  // области для рекурсии (Num/Den/...)
+			// Кандидат фичи (например дробь, корень и т.д.), найденный детектором внутри региона.
+			// Каждый объект полностью самодостаточен: он знает свою область (bbox),
+			// какие подрегионы нужно разобрать рекурсивно (subregions),
+			// какие строки нужно исключить из токенизации (mapRowToSkipRangesStructural),
+			// и как собрать финальный узел из разобранных поддеревьев (assembleFn).
+			struct Candidate {
+				// Прямоугольная область (bounding-box), занимаемая всей фичей.
+				// Для дроби это объединение barRegion + numRegion + denRegion.
+				Model::Region bbox;
+
+				// Подрегионы, которые нужно рекурсивно разобрать перед сборкой узла.
+				// Для дроби это два региона: числитель (num) и знаменатель (den).
+				std::vector<Model::Region> subregions;
+
+				// Карта "строка → X-диапазоны", описывающая только структурные зоны оформления,
+				// которые нельзя токенизировать как символы.
+				// Например, для дроби сюда попадает только линия бара (y строки бара, x1..x2 её ширина).
+				std::unordered_map<int, std::vector<Model::SpanX>> mapRowToSkipRangesStructural;
+
+				// Функция, собирающая финальный узел (INode) из разобранных поддеревьев.
+				// При вызове RegionWalker передаёт сюда уже готовые наборы потомков для subregions,
+				// а функция возвращает конкретный тип узла (например Fraction, Root, Bracket и т.д.).
+				std::function<
+					std::unique_ptr<Model::INode>(
+						std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
+					)
+				> assembleFn;
 			};
 
-
-			// Интерфейс любого детектора регионов.
 			struct IRegionFeature {
 				virtual ~IRegionFeature() {}
 
-				// Найти своих кандидатов в пределах region.
+				// Найти кандидатов внутри region (каждый кандидат уже самодостаточен).
 				virtual std::vector<Candidate> CollectChildren(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region
-				) const = 0;
-
-				// Добавить «структурные» зоны в skip (например, линию бара).
-				// ВНИМАНИЕ: содержимое (Num/Den/...) не добавлять в skip — оно парсится рекурсией.
-				virtual void AppendSkips(
-					const Model::Region& regionCurrent,
-					int candidateId,
-					std::unordered_map<int, std::vector<Model::SpanX>>& skipMap
-				) const = 0;
-
-				// Собрать финальный узел из уже разобранных поддеревьев.
-				virtual std::unique_ptr<Model::INode> Assemble(
-					int candidateId,
-					std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
 				) const = 0;
 			};
 		}
