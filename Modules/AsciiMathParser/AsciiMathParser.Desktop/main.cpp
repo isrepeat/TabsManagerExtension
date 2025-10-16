@@ -343,7 +343,8 @@ int main() {
 		//	fractionBars
 		//);
 
-		features.push_back(std::make_unique<Parse::FractionFeature>(std::move(fractionBars)));
+		//features.push_back(std::make_unique<Parse::FractionFeature>(std::move(fractionBars)));
+		features.push_back(std::make_unique<Parse::FractionFeature>(fractionBars));
 	}
 
 	Parse::RegionWalker regionWalker{ std::move(features) };

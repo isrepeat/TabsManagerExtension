@@ -10,19 +10,13 @@
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Parse {
-			struct FeatureChild {
-				// Владелец — та фича, что породила этого ребёнка
-				class IRegionFeature* owner;
+			using FeatureChildId = std::uintptr_t; // фича сама решает, что класть (обычно индекс)
 
-				// Глобальный bbox узла (например, бар + num/den + tight-обвязка)
-				Model::Region bbox;
-
-				// Набор «подвластных» под-регионов (куда провалится рекурсия):
-				// у дроби это numRegion и denRegion; у радикала — radicand и, возможно, index.
-				std::vector<Model::Region> ownedSubregions;
-
-				// Доп. произвольные данные фичи (type-erased handle)
-				void* implData;
+			struct PlannedChild {
+				const class IRegionFeature* owner;   // кто породил
+				Model::Region               bbox;    // общий бокс ребёнка
+				std::vector<Model::Region>  subregions; // куда рекурсить
+				FeatureChildId              id;      // feature-local ID (напр., индекс бара)
 			};
 
 
@@ -30,25 +24,24 @@ namespace AsciiMathParser {
 			public:
 				virtual ~IRegionFeature() = default;
 
-				// Найти детей в пределах region (без рекурсии)
-				virtual std::vector<FeatureChild> CollectChildren(
+				// Найти детей ТОЛЬКО внутри 'region' (без рекурсии)
+				virtual std::vector<PlannedChild> CollectChildren(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region
-				) = 0;
+				) const = 0;
 
-				// Добавить вклад в skip-карту текущего уровня для данного ребёнка
-				virtual void AppendSkipSpans(
+				// Добавить пропуски только под КОНКРЕТНОГО ребёнка (полоса бара, окна и т.д.)
+				virtual void AppendSkips(
 					const Model::Region& currentRegion,
-					const FeatureChild& child,
+					FeatureChildId id,
 					std::unordered_map<int, std::vector<Model::SpanX>>& skipByRow
 				) const = 0;
 
-				// Построить финальный INode для ребёнка; рекурсивно разобрать его под-регионы через walker
-				virtual std::unique_ptr<Model::INode> BuildNode(
-					const Model::AsciiGrid& grid,
-					const Model::Region& currentRegion,
-					const FeatureChild& child,
-					const IRegionWalker& walker
+				// Сконструировать финальный узел, получив уже распарсенные поддеревья
+				// subtrees.size() == subregions.size() из PlannedChild.
+				virtual std::unique_ptr<Model::INode> Assemble(
+					FeatureChildId id,
+					std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
 				) const = 0;
 			};
 		}

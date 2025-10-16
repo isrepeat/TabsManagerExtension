@@ -8,8 +8,6 @@
       </AdditionalIncludeDirectories>
       <PreprocessorDefinitions>
         %(PreprocessorDefinitions);
-        NUGET_HELPERS_NS=CppFeaturesHelpers;
-        HELPERS_NS=NUGET_HELPERS_NS
       </PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>

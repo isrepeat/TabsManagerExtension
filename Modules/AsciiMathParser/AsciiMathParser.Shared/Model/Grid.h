@@ -122,6 +122,17 @@ namespace AsciiMathParser {
 				int OverlapY(const Region& other) const {
 					return this->rows.OverlapLength(other.rows);
 				}
+
+				// Проверяет, полностью ли данный регион содержит другой (subregion).
+				// Возвращает true, если подрегион целиком лежит внутри текущего региона
+				// (включая совпадение границ).
+				bool ContainsSubregion(const Region& subregion) const {
+					if (this->Left() > subregion.Left()) { return false; }
+					if (this->Right() < subregion.Right()) { return false; }
+					if (this->Top() > subregion.Top()) { return false; }
+					if (this->Bottom() < subregion.Bottom()) { return false; }
+					return true;
+				}
 			};
 
 

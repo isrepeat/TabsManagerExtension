@@ -1,4 +1,6 @@
 #pragma once
+#include <Helpers/Logger.h>
+
 #include "../Model/Geometry.h"
 #include "../Model/Symbol.h"
 #include "IRegionFeature.h"
@@ -11,72 +13,146 @@
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Parse {
-			class RegionWalker : public IRegionWalker {
+			class RegionWalker {
 			public:
-				explicit RegionWalker(std::vector<std::unique_ptr<IRegionFeature>>&& features)
+				explicit RegionWalker(
+					std::vector<std::unique_ptr<IRegionFeature>>&& features
+				)
 					: features_{ std::move(features) } {
 				}
 
 				std::vector<std::unique_ptr<Model::INode>> ParseRegion(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region
-				) const override {
-					// 1) Сбор детей у всех фич
-					std::vector<FeatureChild> allChildren{};
-					for (const auto& featurePtr : this->features_) {
-						std::vector<FeatureChild> locals = featurePtr->CollectChildren(
-							grid,
-							region
+				) const {
+					LOG_FUNCTION_SCOPE(
+						"ParseRegion(): bbox=[x:{}..{} y:{}..{}]",
+						region.Left(),
+						region.Right(),
+						region.Top(),
+						region.Bottom()
+					);
+
+					// 1) Сбор кандидатов от всех фич
+					std::vector<PlannedChild> all{};
+					for (const auto& f : this->features_) {
+						auto v = f->CollectChildren(grid, region);
+
+						LOG_DEBUG_D(
+							"feature {} -> {} candidates",
+							(const void*)f.get(),
+							(int)v.size()
 						);
-						for (auto& ch : locals) {
-							allChildren.push_back(std::move(ch));
+
+						for (const auto& c : v) {
+							LOG_DEBUG_D(
+								"  cand id={} bbox=[{}..{} x {}..{}]; subregions={}",
+								(unsigned long long)c.id,
+								c.bbox.Left(),
+								c.bbox.Right(),
+								c.bbox.Top(),
+								c.bbox.Bottom(),
+								(int)c.subregions.size()
+							);
+						}
+
+						for (auto& x : v) {
+							all.push_back(std::move(x));
 						}
 					}
 
-					// 2) Оставить только верхнеуровневых
-					std::vector<FeatureChild> top = this->FilterTopLevel(allChildren);
+					// 2) Оставить только top-level
+					auto top = this->FilterTopLevel(all);
 
-					// 3) Рекурсивно построить узлы детей
-					std::vector<std::unique_ptr<Model::INode>> childNodes{};
+					LOG_DEBUG_D(
+						"top-level count: {}",
+						(int)top.size()
+					);
+
+					for (const auto& c : top) {
+						LOG_DEBUG_D(
+							"  top id={} bbox=[{}..{} x {}..{}]",
+							(unsigned long long)c.id,
+							c.bbox.Left(),
+							c.bbox.Right(),
+							c.bbox.Top(),
+							c.bbox.Bottom()
+						);
+					}
+
+					// 3) Сформировать skip-карту под top-детей
+					std::unordered_map<int, std::vector<Model::SpanX>> skip{};
 					for (const auto& ch : top) {
-						// Каждая фича сама знает, как рекурсивно обойти свои под-регионы:
-						// ей передаётся ссылка на «walker» (this) для вложенного парсинга.
-						childNodes.push_back(
-							ch.owner->BuildNode(
+						ch.owner->AppendSkips(region, ch.id, skip);
+					}
+					for (auto& kv : skip) {
+						this->MergeRowSpans(kv.second);
+					}
+
+					LOG_DEBUG_D("skip map (merged):");
+					for (const auto& kv : skip) {
+						std::string line{};
+						line += std::format("  y={}: ", kv.first);
+						for (const auto& s : kv.second) {
+							line += std::format("[{}..{}] ", s.Left(), s.Right());
+						}
+						LOG_DEBUG_D("{}", line);
+					}
+
+					// 4) Рекурсивно собрать поддеревья и «собрать» узлы у фичи
+					std::vector<std::unique_ptr<Model::INode>> featureNodes{};
+					featureNodes.reserve(top.size());
+
+					for (const auto& ch : top) {
+						LOG_DEBUG_D(
+							"assemble child id={} subregions={}",
+							(unsigned long long)ch.id,
+							(int)ch.subregions.size()
+						);
+
+						std::vector<std::vector<std::unique_ptr<Model::INode>>> subtrees{};
+						subtrees.reserve(ch.subregions.size());
+
+						for (const auto& sub : ch.subregions) {
+							LOG_DEBUG_D(
+								"  recurse sub=[{}..{} x {}..{}]",
+								sub.Left(),
+								sub.Right(),
+								sub.Top(),
+								sub.Bottom()
+							);
+
+							auto subNodes = this->ParseRegion(
 								grid,
-								region,
-								ch,
-								*this
-							)
+								sub
+							);
+
+							LOG_DEBUG_D(
+								"  sub parsed: {} nodes",
+								(int)subNodes.size()
+							);
+
+							subtrees.push_back(std::move(subNodes));
+						}
+						featureNodes.push_back(
+							ch.owner->Assemble(ch.id, std::move(subtrees))
 						);
 					}
 
-					// 4) Построить skip-карту из вкладов всех верхнеуровневых детей
-					std::unordered_map<int, std::vector<Model::SpanX>> skipByRow{};
-					for (const auto& ch : top) {
-						ch.owner->AppendSkipSpans(
-							region,
-							ch,
-							skipByRow
-						);
-					}
-					// Слить интервалы на строках
-					for (auto& kv : skipByRow) {
-						RegionWalker::MergeRowSpans(kv.second);
-					}
+					// 5) Оставшееся → символы
+					auto symbolNodes = this->TokenizeToSymbols(grid, region, skip);
 
-					// 5) Токенизировать оставшееся в Symbol
-					auto symNodes = this->TokenizeToSymbols(
-						grid,
-						region,
-						skipByRow
-					);
-
-					// 6) Слить по reading-order
+					// 6) Слить по порядку чтения
 					auto merged = this->MergeByReadingOrder(
-						std::move(childNodes),
-						std::move(symNodes)
+						std::move(featureNodes),
+						std::move(symbolNodes)
 					);
+
+					LOG_DEBUG_D(
+						"merged nodes: {}",
+						(int)merged.size()
+					);
+
 					return merged;
 				}
 
@@ -97,9 +173,23 @@ namespace AsciiMathParser {
 						static const std::vector<Model::SpanX> kEmpty{};
 						const auto& rowSkips = (it == skipByRow.end() ? kEmpty : it->second);
 
+
+						const auto allowedRanges = RegionWalker::AllowedRanges(
+							region,
+							rowSkips
+						);
+
+						{
+							std::string line = std::format("  y={} allowed: ", y);
+							for (const auto& a : allowedRanges) {
+								line += std::format("[{}..{}] ", a.Left(), a.Right());
+							}
+							LOG_DEBUG_D("{}", line);
+						}
+
 						// Получаем «разрешённые» промежутки X в этой строке,
 						// то есть области, не попадающие в skipRow.
-						for (const auto& allowedRange : RegionWalker::AllowedRanges(region, rowSkips)) {
+						for (const auto& allowedRange : allowedRanges) {
 							// Начинаем обход разрешённого диапазона слева направо.
 							int x = allowedRange.Left();
 
@@ -128,6 +218,14 @@ namespace AsciiMathParser {
 
 								// Если собран непустой токен — создаём узел Symbol и сохраняем его.
 								if (!token.empty()) {
+									LOG_DEBUG_D(
+										"    [y={}, x={}..{}] token='{}'",
+										y,
+										startX,
+										x - 1,
+										token
+									);
+
 									out.push_back(std::make_unique<Model::Symbol>(
 										std::move(token),
 										startX, // X-позиция первого символа токена
@@ -172,44 +270,55 @@ namespace AsciiMathParser {
 				}
 
 
-				std::vector<FeatureChild> FilterTopLevel(
-					const std::vector<FeatureChild>& input
+				// 1) Оставить только top-level детей:
+				  // ребёнок А не top-level, если его bbox целиком лежит в любом subregion ребёнка B.
+				std::vector<PlannedChild> FilterTopLevel(
+					const std::vector<PlannedChild>& in
 				) const {
-					// Правило: если bbox A целиком попадает в любой ownedSubregion B — A не top-level.
-					std::vector<FeatureChild> out{};
-					for (std::size_t i = 0; i < input.size(); ++i) {
+					std::vector<PlannedChild> out{};
+					out.reserve(in.size());
+
+					for (std::size_t i = 0; i < in.size(); ++i) {
 						bool nested = false;
-						for (std::size_t j = 0; j < input.size(); ++j) {
+
+						for (std::size_t j = 0; j < in.size(); ++j) {
 							if (i == j) {
 								continue;
 							}
-							for (const auto& owned : input[j].ownedSubregions) {
-								if (RegionWalker::ContainsStrict(owned, input[i].bbox)) {
+
+							for (const auto& owned : in[j].subregions) {
+								if (owned.ContainsSubregion(in[i].bbox)) {
 									nested = true;
 									break;
 								}
 							}
-							if (nested) {
+
+							if (nested == true) {
 								break;
 							}
 						}
-						if (!nested) {
-							out.push_back(input[i]);
+
+						if (nested == false) {
+							out.push_back(in[i]);
 						}
 					}
-					// Стабильный порядок: x asc, потом y asc — как и было
+
+					// стабильный reading-order: сначала по X (Left), затем по Y (Top)
 					std::sort(
 						out.begin(),
 						out.end(),
-						[](const FeatureChild& a, const FeatureChild& b) {
+						[](const PlannedChild& a, const PlannedChild& b) {
 							if (a.bbox.Left() != b.bbox.Left()) {
 								return a.bbox.Left() < b.bbox.Left();
 							}
 							return a.bbox.Top() < b.bbox.Top();
 						}
 					);
+
+					LOG_DEBUG_D("FilterTopLevel: in={}, out={}", (int)in.size(), (int)out.size());
 					return out;
 				}
+
 
 				// Разность по X: всё, что можно читать в строке y внутри region (без skip-интервалов).
 				static std::vector<Model::SpanX> AllowedRanges(
@@ -239,10 +348,17 @@ namespace AsciiMathParser {
 				}
 
 
+				// 2) Слить/нормализовать X-интервалы (пересечения и касания).
 				// Сливает перекрывающиеся или примыкающие интервалы на одной строке:
 				// [3..8], [7..10] → [3..10]. Это делает карту skip компактной и
 				// уменьшает количество прыжков токенайзера.
-				static void MergeRowSpans(std::vector<Model::SpanX>& spans) {
+				static void MergeRowSpans(
+					std::vector<Model::SpanX>& spans
+				) {
+					if (spans.empty() == true) {
+						return;
+					}
+
 					std::sort(
 						spans.begin(),
 						spans.end(),
@@ -255,46 +371,23 @@ namespace AsciiMathParser {
 					);
 
 					std::vector<Model::SpanX> merged{};
-					std::optional<std::pair<int, int>> cur{};
+					merged.reserve(spans.size());
 
-					for (const auto& s : spans) {
-						if (!cur.has_value()) {
-							cur = std::make_pair(s.Left(), s.Right());
+					Model::SpanX acc = spans.front();
+					for (std::size_t i = 1; i < spans.size(); ++i) {
+						const auto& s = spans[i];
+						if (s.Left() <= acc.Right() + 1) {
+							// пересекаются или соприкасаются → расширяем
+							acc.x2 = std::max(acc.Right(), s.Right());
 						}
 						else {
-							auto& [cx1, cx2] = *cur;
-							if (s.Left() <= cx2 + 1) {
-								if (s.Right() > cx2) cx2 = s.Right();
-							}
-							else {
-								merged.push_back(Model::SpanX{ cx1, cx2 });
-								cur = std::make_pair(s.Left(), s.Right());
-							}
+							merged.push_back(acc);
+							acc = s;
 						}
 					}
-					if (cur.has_value()) {
-						merged.push_back(Model::SpanX{ cur->first, cur->second });
-					}
-					spans = std::move(merged);
-				}
+					merged.push_back(acc);
 
-				static bool ContainsStrict(
-					const Model::Region& bigRegion,
-					const Model::Region& smallRegion
-				) {
-					if (smallRegion.Left() < bigRegion.Left()) {
-						return false;
-					}
-					if (smallRegion.Right() > bigRegion.Right()) {
-						return false;
-					}
-					if (smallRegion.Top() < bigRegion.Top()) {
-						return false;
-					}
-					if (smallRegion.Bottom() > bigRegion.Bottom()) {
-						return false;
-					}
-					return true;
+					spans = std::move(merged);
 				}
 
 			private:
