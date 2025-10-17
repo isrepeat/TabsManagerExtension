@@ -1,4 +1,6 @@
 #pragma once
+#include <Helpers/Std/Extensions/memoryEx.h>
+
 #include "Geometry.h"
 #include "Grid.h"
 
@@ -18,7 +20,7 @@ namespace AsciiMathParser {
 
 
 			struct NodesGroup {
-				std::vector<std::unique_ptr<INode>> nodes;
+				std::vector<std::ex::unique_ptr<INode>> nodes;
 			};
 		}
 	}

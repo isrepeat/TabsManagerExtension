@@ -1,13 +1,11 @@
 #include <Helpers/Text.h>
 
-#include "Detect/FractionBarDetector.h"
+#include "Parse/FractionBarDetector.h"
 #include "Parse/FractionFeature.h"
-#include "Parse/IRegionFeature.h"
-//#include "Parse/RegionParser.h"
+#include "Parse/GroupFeature.h"
 #include "Parse/RegionWalker.h"
 #include "Model/INode.h"
 #include "Model/Grid.h"
-
 
 #include <iostream>
 #include <format>
@@ -16,13 +14,20 @@
 
 /*
 
-									   e
+                x^{2}               // Ok
+                x_{k}               // Ok
+                x^{2}_{k}           // Ok
+                x_{k}^{2}           // Error
+                x^{2^{e}}_{k_{i}}   // Ok (Nested expr)
+
+
+                                       e
 								2y + =====				[bar1]
-									   2
+                                       2
 					  a + b + ============ * k			[bar2]
-									n
+                                   n
 				L =  =============================		[bar3]
-								 z
+                                  z
 
 1)
 
@@ -74,41 +79,7 @@
 */
 
 
-enum class FormulaType {
-	FromulaFrac1 = 0,
-	FromulaFrac2,
-	FromulaFrac3,
-};
 
-const std::map<FormulaType, std::string> formulaTexts = {
-	{ FormulaType::FromulaFrac1,
-	"//math_start                   \n"
-	"                               \n"
-	"            a + b              \n"
-	"L =  ========================= \n"
-	"             z                 \n"
-	"//math_end                     \n" },
-
-	{ FormulaType::FromulaFrac2,
-	"//math_start                   \n"
-	"                    2y         \n"
-	"          a + b + ======       \n"
-	"                    n          \n"
-	"L =  ========================= \n"
-	"                z + h          \n"
-	"//math_end                     \n" },
-
-	{ FormulaType::FromulaFrac3,
-	"//math_start                   \n"
-	"                    2y         \n"
-	"          a + b + ====== * k   \n"
-	"                    n          \n"
-	"L =  ========================= \n"
-	"                     e         \n"
-	"                z + ===        \n"
-	"                     2         \n"
-	"//math_end                     \n" }
-};
 
 
 //const std::string text =
@@ -187,7 +158,7 @@ namespace AsciiMathParser::Core {
 
 		void PrintGridWithOuterBarHighlight(
 			const AsciiMathParser::Core::Model::AsciiGrid& grid,
-			const std::vector<AsciiMathParser::Core::Detect::FractionBar>& bars,
+			const std::vector<Parse::FractionBar>& bars,
 			int barIdx = -1,
 			int numBgColor = 236,
 			int denBgColor = 240
@@ -255,43 +226,159 @@ namespace AsciiMathParser::Core {
 			}
 		}
 
-		void DumpNodes(
-			const std::vector<std::unique_ptr<Model::INode>>& nodes,
-			int depth = 0
-		) {
-			for (const auto& n : nodes) {
-				if (const auto* f = dynamic_cast<const Model::Fraction*>(n.get())) {
-					Dump::Indent(depth);
-					std::cout << "[Frac]\n";
 
-					Dump::Indent(depth);
-					std::cout << "  Num:\n";
-					Dump::DumpNodes(f->Num().nodes, depth + 2);
+        void DumpNodes(
+            const std::vector<std::ex::unique_ptr<Model::INode>>& nodes,
+            int depth = 0
+        );
 
-					Dump::Indent(depth);
-					std::cout << "  Den:\n";
-					Dump::DumpNodes(f->Den().nodes, depth + 2);
-				}
-				else if (const auto* s = dynamic_cast<const Model::Symbol*>(n.get())) {
-					Dump::Indent(depth);
-					std::cout << std::format("[Symbol] '{}'\n", s->Content());
-				}
-				else {
-					Dump::Indent(depth);
-					std::cout << "[Unknown node]\n";
-				}
-			}
-		}
+        // ---- single node ----
+        void DumpNode(
+            const Model::INode& n,
+            int depth
+        ) {
+            if (const auto* f = dynamic_cast<const Model::Fraction*>(&n)) {
+                Dump::Indent(depth);
+                std::cout << "[Frac]\n";
+
+                Dump::Indent(depth);
+                std::cout << "  Num:\n";
+                Dump::DumpNodes(f->Num().nodes, depth + 2);
+
+                Dump::Indent(depth);
+                std::cout << "  Den:\n";
+                Dump::DumpNodes(f->Den().nodes, depth + 2);
+                return;
+            }
+
+            if (const auto* s = dynamic_cast<const Model::Symbol*>(&n)) {
+                Dump::Indent(depth);
+                std::cout << std::format("[Symbol] '{}'\n", s->Content());
+                return;
+            }
+
+            if (const auto* g = dynamic_cast<const Model::Group*>(&n)) {
+                Dump::Indent(depth);
+                std::cout << "[Group]\n";
+
+                Dump::Indent(depth);
+                std::cout << "  Inner:\n";
+                Dump::DumpNodes(g->Inner().nodes, depth + 2);
+                return;
+            }
+
+            if (const auto* sc = dynamic_cast<const Model::Script*>(&n)) {
+                Dump::Indent(depth);
+                std::cout << "[Script]\n";
+
+                Dump::Indent(depth);
+                std::cout << "  Base:\n";
+                Dump::DumpNode(sc->Base(), depth + 2);
+
+                if (sc->Sup().has_value()) {
+                    Dump::Indent(depth);
+                    std::cout << "  Sup:\n";
+                    Dump::DumpNodes(sc->Sup()->nodes, depth + 2);
+                }
+                if (sc->Sub().has_value()) {
+                    Dump::Indent(depth);
+                    std::cout << "  Sub:\n";
+                    Dump::DumpNodes(sc->Sub()->nodes, depth + 2);
+                }
+                return;
+            }
+
+            Dump::Indent(depth);
+            std::cout << std::format("[Unknown node: {}]\n", typeid(n).name());
+        }
+
+        // ---- many nodes ----
+        void DumpNodes(
+            const std::vector<std::ex::unique_ptr<Model::INode>>& nodes,
+            int depth
+        ) {
+            for (const auto& n : nodes) {
+                Dump::DumpNode(*n, depth);
+            }
+        }
 	}
 }
 
+
+enum class FormulaType {
+    FromulaFrac1 = 0,
+    FromulaFrac2,
+    FromulaFrac3,
+    FromulaIndex1 = 10,
+    FromulaIndex2,
+    FromulaIndex3,
+    FromulaIndex4,
+};
+
+const std::map<FormulaType, std::string> formulaTexts = {
+    { FormulaType::FromulaFrac1,
+    "//math_start                   \n"
+    "                               \n"
+    "            a + b              \n"
+    "L =  ========================= \n"
+    "             z                 \n"
+    "//math_end                     \n" },
+
+    { FormulaType::FromulaFrac2,
+    "//math_start                   \n"
+    "                    2y         \n"
+    "          a + b + ======       \n"
+    "                    n          \n"
+    "L =  ========================= \n"
+    "                z + h          \n"
+    "//math_end                     \n" },
+
+    { FormulaType::FromulaFrac3,
+    "//math_start                   \n"
+    "                    2y         \n"
+    "          a + b + ====== * k   \n"
+    "                    n          \n"
+    "L =  ========================= \n"
+    "                     e         \n"
+    "                z + ===        \n"
+    "                     2         \n"
+    "//math_end                     \n" },
+
+    { FormulaType::FromulaIndex1,
+    "//math_start                   \n"
+    "    L = a^{2} + 3 * k          \n"
+    "//math_end                     \n" },
+
+    { FormulaType::FromulaIndex2,
+    "//math_start                   \n"
+    "  L = a^{2} + b^{2}_{4} + 3k   \n"
+    "//math_end                     \n" },
+
+    { FormulaType::FromulaIndex3,
+    "//math_start                   \n"
+    "                   2y          \n"
+    "  L = a^{2} + =========== * k  \n"
+    "               n_{i} + 1       \n"
+    "//math_end                     \n" },
+
+    { FormulaType::FromulaIndex4,
+    "//math_start                       \n"
+    "                       2y          \n"
+    "      a + b^{2} + =========== * k  \n"
+    "                   n_{i} + 9       \n"
+    "L =  ============================= \n"
+    "                    e              \n"
+    "               z + ===             \n"
+    "                    2              \n"
+    "//math_end                         \n" },
+};
 
 
 int main() {
 	using namespace AsciiMathParser::Core;
 
 	const std::string mathBlock = LocalHelpers::ExtractMathBlock(
-		formulaTexts.at(FormulaType::FromulaFrac3)
+		formulaTexts.at(FormulaType::FromulaIndex3)
 	);
 
 	std::cout << "==== Raw block ====\n";
@@ -301,10 +388,13 @@ int main() {
 	auto grid = Model::AsciiGrid{ mathBlock };
 	auto wholeRegion = LocalHelpers::WholeRegion(grid);
 
-	auto features = std::vector<std::unique_ptr<Parse::IRegionFeature>>{};
+	auto features = std::vector<std::ex::unique_ptr<Parse::IRegionFeature>>{};
+
+    features.push_back(std::make_unique<Parse::GroupFeature>());
+
 	{
-		Detect::FractionBarDetector barDetector{ grid };
-		std::vector<Detect::FractionBar> fractionBars = barDetector.DetectBars();
+		Parse::FractionBarDetector barDetector{ grid };
+		std::vector<Parse::FractionBar> fractionBars = barDetector.DetectBars();
 
 		std::cout << std::format("fractionBars count: {}\n", fractionBars.size());
 

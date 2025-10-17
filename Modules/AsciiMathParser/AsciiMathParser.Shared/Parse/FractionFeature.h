@@ -1,18 +1,18 @@
 #pragma once
 #include <Helpers/Logger.h>
 
-#include "../Detect/FractionBarDetector.h"
 #include "../Model/Fraction.h"
 #include "../Model/Geometry.h"
+#include "FractionBarDetector.h"
 #include "IRegionFeature.h"
 
 namespace AsciiMathParser {
 	namespace Core {
 		namespace Parse {
-			class FractionFeature final : public IRegionFeature {
+			class FractionFeature : public IRegionFeature {
 			public:
 				explicit FractionFeature(
-					const std::vector<Detect::FractionBar>& bars
+					const std::vector<FractionBar>& bars
 				)
 					: bars{ bars } {
 				}
@@ -94,8 +94,8 @@ namespace AsciiMathParser {
 
 						// assemble-замыкание: строит Fraction из готовых subtrees
 						candidate.assembleFn =
-							[b](std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees)
-							-> std::unique_ptr<Model::INode> {
+							[b](std::vector<std::vector<std::ex::unique_ptr<Model::INode>>>&& subtrees)
+							-> std::ex::unique_ptr<Model::INode> {
 							auto numGroup = Model::NodesGroup{ std::move(subtrees.at(0)) };
 							auto denGroup = Model::NodesGroup{ std::move(subtrees.at(1)) };
 
@@ -106,7 +106,7 @@ namespace AsciiMathParser {
 									b.denRegion
 								);
 
-							return std::make_unique<Model::Fraction>(
+							return std::ex::make_unique_ex<Model::Fraction>(
 								std::move(numGroup),
 								std::move(denGroup),
 								unionRegion
@@ -132,7 +132,7 @@ namespace AsciiMathParser {
 				}
 
 			private:
-				std::vector<Detect::FractionBar> bars;
+				std::vector<FractionBar> bars;
 			};
 		}
 	}

@@ -10,9 +10,6 @@
     <Filter Include="Sources\Model">
       <UniqueIdentifier>{b3dca50e-241e-4c62-b9e9-a1cef3716717}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Sources\Detect">
-      <UniqueIdentifier>{37170771-dfcc-4ca8-9a6b-a3445faced27}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Sources\Parse">
       <UniqueIdentifier>{4dd06e4b-023f-4eee-bf54-ce2a59a604b8}</UniqueIdentifier>
     </Filter>
@@ -32,23 +29,14 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Geometry.h">
       <Filter>Sources\Model</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Detect\FractionBarDetector.h">
-      <Filter>Sources\Detect</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\INode.h">
       <Filter>Sources\Model</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionParser.h">
-      <Filter>Sources\Parse</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Fraction.h">
       <Filter>Sources\Model</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Symbol.h">
       <Filter>Sources\Model</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\IRegionWalker.h">
-      <Filter>Sources\Parse</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionWalker.h">
       <Filter>Sources\Parse</Filter>
@@ -57,6 +45,18 @@
       <Filter>Sources\Parse</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)Parse\IRegionFeature.h">
+      <Filter>Sources\Parse</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\FractionBarDetector.h">
+      <Filter>Sources\Parse</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Group.h">
+      <Filter>Sources\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Script.h">
+      <Filter>Sources\Model</Filter>
+    </ClInclude>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\GroupFeature.h">
       <Filter>Sources\Parse</Filter>
     </ClInclude>
   </ItemGroup>

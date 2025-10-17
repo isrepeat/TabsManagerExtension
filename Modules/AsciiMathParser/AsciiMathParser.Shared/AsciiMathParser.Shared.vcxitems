@@ -23,17 +23,18 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)LogicalBoxParser.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(MSBuildThisFileDirectory)Detect\FractionBarDetector.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)LogicalBoxParser.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Fraction.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Geometry.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Grid.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Group.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\INode.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Model\Script.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Model\Symbol.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\FractionBarDetector.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Parse\FractionFeature.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\GroupFeature.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Parse\IRegionFeature.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\IRegionWalker.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionParser.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Parse\RegionWalker.h" />
   </ItemGroup>
 </Project>

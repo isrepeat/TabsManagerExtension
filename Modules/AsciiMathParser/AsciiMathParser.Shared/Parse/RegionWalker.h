@@ -3,8 +3,9 @@
 
 #include "../Model/Geometry.h"
 #include "../Model/Symbol.h"
+#include "../Model/Script.h"
+#include "../Model/Group.h"
 #include "IRegionFeature.h"
-#include "IRegionWalker.h"
 
 #include <unordered_map>
 #include <algorithm>
@@ -36,12 +37,12 @@ namespace AsciiMathParser {
 			class RegionWalker {
 			public:
 				explicit RegionWalker(
-					std::vector<std::unique_ptr<IRegionFeature>>&& features
+					std::vector<std::ex::unique_ptr<IRegionFeature>>&& features
 				)
 					: features{ std::move(features) } {
 				}
 
-				std::vector<std::unique_ptr<Model::INode>> ParseRegion(
+				std::vector<std::ex::unique_ptr<Model::INode>> ParseRegion(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region
 				) const {
@@ -49,11 +50,18 @@ namespace AsciiMathParser {
 					return this->ParseRegion(grid, region, mapRowToSkipRanges);
 				}
 
-				std::vector<std::unique_ptr<Model::INode>> ParseRegion(
+				std::vector<std::ex::unique_ptr<Model::INode>> ParseRegion(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region,
 					const std::unordered_map<int, std::vector<Model::SpanX>>& inheritedMapRowToSkipRanges
 				) const {
+                    LOG_FUNCTION_SCOPE("ParseRegion(): bbox=[x:{}..{} y:{}..{}]",
+                        region.Left(),
+                        region.Right(),
+                        region.Top(),
+                        region.Bottom()
+                    );
+
 					const auto topCandidates = this->CollectTopLevel(grid, region);
 					auto mapRowToSkipRanges = this->BuildRowSkipRangesMap(
 						region,
@@ -61,11 +69,11 @@ namespace AsciiMathParser {
 						inheritedMapRowToSkipRanges
 					);
 
-					std::vector<std::unique_ptr<Model::INode>> complexNodes{};
+					std::vector<std::ex::unique_ptr<Model::INode>> complexNodes{};
 					complexNodes.reserve(topCandidates.size());
 
 					for (const auto& topCandidate : topCandidates) {
-						std::vector<std::vector<std::unique_ptr<Model::INode>>> subtrees{};
+						std::vector<std::vector<std::ex::unique_ptr<Model::INode>>> subtrees{};
 						subtrees.reserve(topCandidate.subregions.size());
 
 						for (const auto& sub : topCandidate.subregions) {
@@ -95,6 +103,10 @@ namespace AsciiMathParser {
 						std::move(complexNodes),
 						std::move(symbolsNodes)
 					);
+
+                    nodes = this->AssembleInlineScripts(
+                        std::move(nodes)
+                    );
 
 					return nodes;
 				}
@@ -221,7 +233,7 @@ namespace AsciiMathParser {
 				// 3) Занять регионы собранных фич на текущем уровне (чтобы не было «хвостов»)
 				void OccupyFeatureRegions(
 					const Model::Region& region,
-					const std::vector<std::unique_ptr<Model::INode>>& feats,
+					const std::vector<std::ex::unique_ptr<Model::INode>>& feats,
 					std::unordered_map<int, std::vector<Model::SpanX>>& mapRowToSkipRanges
 				) const {
 					for (const auto& node : feats) {
@@ -254,12 +266,12 @@ namespace AsciiMathParser {
 
 
 				// 4) Всё, что не закрыто пропусками — токенизируем как «простые» символы.
-				std::vector<std::unique_ptr<Model::INode>> TokenizeToSymbols(
+				std::vector<std::ex::unique_ptr<Model::INode>> TokenizeToSymbols(
 					const Model::AsciiGrid& grid,
 					const Model::Region& region,
 					const std::unordered_map<int, std::vector<Model::SpanX>>& mapRowToSkipRanges
 				) const {
-					std::vector<std::unique_ptr<Model::INode>> out{};
+					std::vector<std::ex::unique_ptr<Model::INode>> out{};
 
 					// Проходим все строки текущего региона сверху вниз.
 					for (int y = region.Top(); y <= region.Bottom(); ++y) {
@@ -289,46 +301,64 @@ namespace AsciiMathParser {
 							// Начинаем обход разрешённого диапазона слева направо.
 							int x = allowedSpanX.Left();
 
-							// Идём по всем символам до конца разрешённого диапазона.
-							while (x <= allowedSpanX.Right()) {
-								// Пропускаем все пробелы подряд.
-								while (x <= allowedSpanX.Right() && grid.At(x, y) == ' ') {
-									++x;
-								}
+                            // Идём по всем символам до конца разрешённого диапазона.
+                            while (x <= allowedSpanX.Right()) {
+                                // Пропускаем все пробелы подряд.
+                                while (x <= allowedSpanX.Right() && grid.At(x, y) == ' ') {
+                                    ++x;
+                                }
 
-								// Если после пропусков дошли до конца диапазона — строка исчерпана.
-								if (x > allowedSpanX.Right()) {
-									break;
-								}
+                                if (x > allowedSpanX.Right()) {
+                                    break;
+                                }
 
-								// Здесь x указывает на первый непробельный символ токена.
-								const int startX = x;
-								std::string token{};
+                                // Если текущий символ — '^' или '_' — это всегда отдельный односимвольный токен.
+                                const char ch = grid.At(x, y);
+                                if (ch == '^' || ch == '_') {
+                                    LOG_DEBUG_D("    [y={}, x={}] token='{}'", y, x, std::string(1, ch));
 
-								// Собираем последовательность непробельных символов до конца токена
-								// (пока не встретим пробел или конец диапазона).
-								while (x <= allowedSpanX.Right() && grid.At(x, y) != ' ') {
-									token.push_back(grid.At(x, y));
-									++x;
-								}
+                                    std::string one{ ch };
+                                    out.push_back(std::ex::make_unique_ex<Model::Symbol>(
+                                        std::move(one),
+                                        x,
+                                        y
+                                    ));
 
-								// Если собран непустой токен — создаём узел Symbol и сохраняем его.
-								if (!token.empty()) {
-									LOG_DEBUG_D(
-										"    [y={}, x={}..{}] token='{}'",
-										y,
-										startX,
-										x - 1,
-										token
-									);
+                                    ++x;
+                                    continue;
+                                }
 
-									out.push_back(std::make_unique<Model::Symbol>(
-										std::move(token),
-										startX, // X-позиция первого символа токена
-										y       // строка, на которой токен расположен
-									));
-								}
-							}
+                                // Иначе накапливаем «слово» до ближайшего пробела ИЛИ до '^'/'_'.
+                                const int startX = x;
+                                std::string token{};
+
+                                while (x <= allowedSpanX.Right()) {
+                                    const char c = grid.At(x, y);
+                                    if (c == ' ' || c == '^' || c == '_') {
+                                        break;
+                                    }
+                                    token.push_back(c);
+                                    ++x;
+                                }
+
+                                if (!token.empty()) {
+                                    LOG_DEBUG_D(
+                                        "    [y={}, x={}..{}] token='{}'",
+                                        y,
+                                        startX,
+                                        x - 1,
+                                        token
+                                    );
+
+                                    out.push_back(std::ex::make_unique_ex<Model::Symbol>(
+                                        std::move(token),
+                                        startX,
+                                        y
+                                    ));
+                                }
+
+                                // Цикл не «съедает» '^'/'_' здесь — на следующей итерации они будут разобраны веткой выше
+                            }
 						}
 					}
 
@@ -337,41 +367,89 @@ namespace AsciiMathParser {
 
 
 				// Разность по X: всё, что можно читать в строке 'y' внутри region (без skip-интервалов).
-				std::vector<Model::SpanX> GetRowAllowedRanges(
-					const Model::Region& region,
-					const std::vector<Model::SpanX>& skipRowRanges
-				) const {
-					std::vector<Model::SpanX> rowAllowedRanges{};
+                std::vector<Model::SpanX> GetRowAllowedRanges(
+                    const Model::Region& region,
+                    const std::vector<Model::SpanX>& skipRowRanges
+                ) const {
+                    std::vector<Model::SpanX> allowed{};
 
-					if (skipRowRanges.empty()) {
-						rowAllowedRanges.push_back(Model::SpanX{ region.Left(), region.Right() });
-						return rowAllowedRanges;
-					}
+                    // 1) Копия skip'ов, ОГРАНИЧЕННАЯ текущим region и отфильтрованная по пересечению
+                    std::vector<Model::SpanX> clipped{};
+                    clipped.reserve(skipRowRanges.size());
 
-					int cur = region.Left();
-					for (const auto& spanX : skipRowRanges) {
-						if (spanX.Left() > cur) {
-							rowAllowedRanges.push_back(Model::SpanX{ cur, spanX.Left() - 1 });
-						}
-						cur = std::max(cur, spanX.Right() + 1);
-					}
+                    for (const auto& s : skipRowRanges) {
+                        // нет пересечения с region -> пропускаем
+                        if (s.Right() < region.Left() || s.Left() > region.Right()) {
+                            continue;
+                        }
+                        // клип по границам region
+                        Model::SpanX t{
+                            std::max(s.Left(), region.Left()),
+                            std::min(s.Right(), region.Right())
+                        };
+                        clipped.push_back(t);
+                    }
 
-					if (cur <= region.Right()) {
-						rowAllowedRanges.push_back(Model::SpanX{ cur, region.Right() });
-					}
+                    if (clipped.empty()) {
+                        allowed.push_back(Model::SpanX{ region.Left(), region.Right() });
+                        return allowed;
+                    }
 
-					return rowAllowedRanges;
-				}
+                    // 2) Слить пересекающиеся/смежные пропуски в пределах region
+                    std::sort(
+                        clipped.begin(),
+                        clipped.end(),
+                        [](const Model::SpanX& a, const Model::SpanX& b) {
+                            if (a.x1 != b.x1) {
+                                return a.x1 < b.x1;
+                            }
+                            return a.x2 < b.x2;
+                        }
+                    );
+
+                    std::vector<Model::SpanX> merged{};
+                    merged.reserve(clipped.size());
+
+                    Model::SpanX cur = clipped.front();
+                    for (std::size_t i = 1; i < clipped.size(); ++i) {
+                        if (clipped[i].x1 <= (cur.x2 + 1)) {
+                            cur.x2 = std::max(cur.x2, clipped[i].x2);
+                        }
+                        else {
+                            merged.push_back(cur);
+                            cur = clipped[i];
+                        }
+                    }
+                    merged.push_back(cur);
+
+                    // 3) Построить allowed как дополнение merged внутри region
+                    int x = region.Left();
+                    for (const auto& skip : merged) {
+                        if (skip.x1 > x) {
+                            allowed.push_back(Model::SpanX{ x, skip.x1 - 1 });
+                        }
+                        x = skip.x2 + 1;
+                        if (x > region.Right()) {
+                            break;
+                        }
+                    }
+                    if (x <= region.Right()) {
+                        allowed.push_back(Model::SpanX{ x, region.Right() });
+                    }
+
+                    return allowed;
+                }
+
 
 
 				// 5) Объединяет сложные и простые узлы и сортирует их «по чтению»:
 				// первично по Left(), вторично по Top().
 				// Используем stable_sort, чтобы сохранять относительный порядок элементов
-				std::vector<std::unique_ptr<Model::INode>> MergeByReadingOrder(
-					std::vector<std::unique_ptr<Model::INode>> complexNodes,
-					std::vector<std::unique_ptr<Model::INode>> symbolsNodes
+				std::vector<std::ex::unique_ptr<Model::INode>> MergeByReadingOrder(
+					std::vector<std::ex::unique_ptr<Model::INode>> complexNodes,
+					std::vector<std::ex::unique_ptr<Model::INode>> symbolsNodes
 				) const {
-					std::vector<std::unique_ptr<Model::INode>> all{};
+					std::vector<std::ex::unique_ptr<Model::INode>> all{};
 					all.reserve(complexNodes.size() + symbolsNodes.size());
 
 					for (auto& p : complexNodes) {
@@ -384,7 +462,7 @@ namespace AsciiMathParser {
 					std::stable_sort(
 						all.begin(),
 						all.end(),
-						[](const std::unique_ptr<Model::INode>& a, const std::unique_ptr<Model::INode>& b) {
+						[](const std::ex::unique_ptr<Model::INode>& a, const std::ex::unique_ptr<Model::INode>& b) {
 							const auto ra = a->GetRegion();
 							const auto rb = b->GetRegion();
 							if (ra.Left() != rb.Left()) {
@@ -397,8 +475,157 @@ namespace AsciiMathParser {
 					return all;
 				}
 
+
+                // Склеивает [Base] ^ {Group} [_ {Group}]
+                // Условие: '^' должен идти ДО '_' (если оба есть).
+                std::vector<std::ex::unique_ptr<Model::INode>> AssembleInlineScripts(
+                    std::vector<std::ex::unique_ptr<Model::INode>> nodes
+                ) const {
+                    if (nodes.empty()) {
+                        return nodes;
+                    }
+
+                    std::vector<std::ex::unique_ptr<Model::INode>> out{};
+                    out.reserve(nodes.size());
+
+                    for (std::size_t i = 0; i < nodes.size(); /* i изменяем внутри */) {
+                        // База — любой узел на текущей позиции.
+                        auto& nodeBase = nodes[i];
+
+                        // Попытаемся распознать суффиксы супер/саб сразу справа от базы в той же строке.
+                        std::optional<Model::NodesGroup> nodesGroupSup{};
+                        std::optional<Model::NodesGroup> nodesGroupSub{};
+
+                        std::size_t j = i + 1;
+
+                        // Вспомогалка: если на позиции idx стоит Group — забрать ЕЁ ВНУТРЕННОСТЬ переносом и удалить Group.
+                        auto tryTakeGroupFn = [&](std::size_t& idx) -> std::optional<Model::NodesGroup> {
+                            if (idx >= nodes.size()) {
+                                return std::nullopt;
+                            }
+
+                            //auto* group = dynamic_cast<Model::Group*>(nodes[idx].get());
+                            auto group = nodes[idx].AsView<Model::Group>();
+                            if (group == nullptr) {
+                                return std::nullopt;
+                            }
+
+                            Model::NodesGroup nodesGroup = group->ReleaseInner();
+                            nodes.erase(nodes.begin() + static_cast<std::ptrdiff_t>(idx));
+                            return nodesGroup;
+                            };
+
+                        auto isSymbolWithCharFn = [](const std::ex::unique_ptr<Model::INode>& n, char ch) {
+                            if (auto symbol = n.AsView<Model::Symbol>()) {
+                                const auto& content = symbol->Content();
+                                return content.size() == 1 && content[0] == ch;
+                            }
+                            return false;
+                            };
+
+                        // ===== СУПЕРСКРИПТ =====
+                        // Правило: удаляем '^' ТОЛЬКО если сразу за ним идёт {Group} в той же строке.
+                        if (j < nodes.size()) {
+                            const bool sameRow = (nodes[j]->GetRegion().Top() == nodeBase->GetRegion().Top());
+                            const bool isCaret = isSymbolWithCharFn(nodes[j], '^');
+
+                            if (sameRow && isCaret) {
+                                // Проверим, что следом действительно стоит Group; иначе — НЕ трогаем '^'.
+                                if ((j + 1) < nodes.size() &&
+                                    nodes[j + 1].Is<Model::Group>()
+                                    ) {
+                                    LOG_DEBUG_D("Assemble: found '^' with Group");
+
+                                    // Удаляем '^'; теперь на позиции j стоит Group.
+                                    nodes.erase(nodes.begin() + static_cast<std::ptrdiff_t>(j));
+
+                                    if (auto grabbed = tryTakeGroupFn(j); grabbed.has_value()) {
+                                        nodesGroupSup = std::move(grabbed);
+                                    }
+                                }
+                                else {
+                                    LOG_DEBUG_D("Assemble: '^' has no Group next — skip");
+                                }
+                            }
+                        }
+
+                        // ===== САБСКРИПТ =====
+                        // Аналогично: '_' удаляем только если за ним немедленно идёт {Group} в той же строке.
+                        if (j < nodes.size()) {
+                            const bool sameRow = (nodes[j]->GetRegion().Top() == nodeBase->GetRegion().Top());
+                            const bool isUnderscore = isSymbolWithCharFn(nodes[j], '_');
+
+                            if (sameRow && isUnderscore) {
+                                if ((j + 1) < nodes.size() &&
+                                    nodes[j + 1].Is<Model::Group>()
+                                    ) {
+                                    LOG_DEBUG_D("Assemble: found '_' with Group");
+
+                                    nodes.erase(nodes.begin() + static_cast<std::ptrdiff_t>(j));
+
+                                    if (auto grabbed = tryTakeGroupFn(j); grabbed.has_value()) {
+                                        nodesGroupSub = std::move(grabbed);
+                                    }
+                                }
+                                else {
+                                    LOG_DEBUG_D("Assemble: '_' has no Group next — skip");
+                                }
+                            }
+                        }
+
+                        // Если что-то из sup/sub нашлось — строим Script и «съедаем» base.
+                        if (nodesGroupSup.has_value() ||
+                            nodesGroupSub.has_value()
+                            ) {
+                            auto ownedBase = std::move(nodeBase);
+                            nodes.erase(nodes.begin() + static_cast<std::ptrdiff_t>(i));
+
+                            auto scriptNode = std::ex::make_unique_ex<Model::Script>(
+                                std::move(ownedBase),
+                                std::move(nodesGroupSup),
+                                std::move(nodesGroupSub)
+                            );
+
+                            out.push_back(std::move(scriptNode));
+                            // i не увеличиваем: на этой позиции уже стоит следующий элемент,
+                            // цикл продолжит с текущего i.
+                        }
+                        else {
+                            // Ничего не склеилось — переносим base как есть.
+                            out.push_back(std::move(nodeBase));
+                            nodes.erase(nodes.begin() + static_cast<std::ptrdiff_t>(i));
+                            // i не увеличиваем по той же причине — на i сместился следующий узел.
+                        }
+                    }
+
+                    // Перенесём хвост (на всякий случай) — обычно пусто.
+                    for (auto& node : nodes) {
+                        out.push_back(std::move(node));
+                    }
+
+                    // Стабилизируем порядок чтения (слева-направо, сверху-вниз).
+                    std::stable_sort(
+                        out.begin(),
+                        out.end(),
+                        [](const std::ex::unique_ptr<Model::INode>& nodeA,
+                            const std::ex::unique_ptr<Model::INode>& nodeB) {
+                                const auto rA = nodeA->GetRegion();
+                                const auto rB = nodeB->GetRegion();
+
+                                if (rA.Left() != rB.Left()) {
+                                    return (rA.Left() < rB.Left());
+                                }
+                                else {
+                                    return (rA.Top() < rB.Top());
+                                }
+                        }
+                    );
+
+                    return out;
+                }
+
 			private:
-				std::vector<std::unique_ptr<IRegionFeature>> features;
+				std::vector<std::ex::unique_ptr<IRegionFeature>> features;
 			};
 		}
 	}

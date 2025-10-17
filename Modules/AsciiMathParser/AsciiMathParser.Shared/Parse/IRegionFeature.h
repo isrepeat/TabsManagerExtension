@@ -1,7 +1,6 @@
 #pragma once
 #include "../Model/INode.h"
 #include "../Model/Grid.h"
-#include "IRegionWalker.h"
 
 #include <unordered_map>
 #include <vector>
@@ -35,8 +34,8 @@ namespace AsciiMathParser {
 				// При вызове RegionWalker передаёт сюда уже готовые наборы потомков для subregions,
 				// а функция возвращает конкретный тип узла (например Fraction, Root, Bracket и т.д.).
 				std::function<
-					std::unique_ptr<Model::INode>(
-						std::vector<std::vector<std::unique_ptr<Model::INode>>>&& subtrees
+					std::ex::unique_ptr<Model::INode>(
+						std::vector<std::vector<std::ex::unique_ptr<Model::INode>>>&& subtrees
 					)
 				> assembleFn;
 			};

@@ -5,7 +5,7 @@
 
 namespace AsciiMathParser {
 	namespace Core {
-		namespace Detect {
+		namespace Parse {
 			struct FractionBar {
 				Model::RowRegion barRegion;
 				Model::Region numRegion;
