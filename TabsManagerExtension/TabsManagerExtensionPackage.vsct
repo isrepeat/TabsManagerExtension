@@ -9,78 +9,26 @@
   <!--The Commands section is where commands, menus, and menu groups are defined.
       This section uses a Guid to identify the package that provides the command defined inside it. -->
   <Commands package="guidTabsManagerExtensionPackage">
-    <Menus>
-      <Menu guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbar" priority="0x0000" type="Toolbar">
-        <CommandFlag>DefaultDocked</CommandFlag>
-        <Strings>
-          <ButtonText>Tabs Manager</ButtonText>
-          <CommandName>TabsManagerToolbar</CommandName>
-        </Strings>
-      </Menu>
-    </Menus>
-    
     <Groups>
-      <!--<Group guid="guidTabsManagerExtensionPackageCmdSet" id="MyCommandGroup" priority="0x0600">
+      <Group guid="guidTabsManagerExtensionPackageCmdSet" id="MyCommandGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
-      </Group>-->
-      
-      <!--<Group guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" priority="0x0100">
-        <Parent guid="guidSHLMainMenu" id="IDM_VS_TOOL_STANDARD" />
-      </Group>-->
+      </Group>
 
       <Group guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" priority="0x0100">
-        <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbar" />
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_TOOL_STANDARD" />
       </Group>
     </Groups>
     
     <!--Buttons section. -->
     <!--This section defines the elements the user can interact with, like a menu command or a button
         or combo box in a toolbar. -->
-    <Buttons>     
-      <!--<Button guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1"/>
-        <Icon guid="guidImages" id="bmpPic1" />
-        <Strings>
-          <ButtonText>TabsManagerToolWindow</ButtonText>
-        </Strings>
-      </Button>-->
-
-      <!--<Button guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100" type="Button">
+    <Buttons>
+      <Button guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100" type="Button">
         <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyCommandGroup" />
         <Icon guid="guidImages" id="bmpPic1" />
         <Strings>
-          <ButtonText>Tabs Manager</ButtonText>
-        </Strings>
-      </Button>-->
-
-
-      <!--<Button guid="guidTabsManagerExtensionPackageCmdSet"
-              id="TabsManagerToolWindowCommandId"
-              priority="0x0000"
-              type="Button">
-        <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" />
-        <Icon guid="guidImages" id="bmpPic1" />
-        <Strings>
-          <ButtonText>Tabs Manager</ButtonText>
-        </Strings>
-      </Button>-->
-
-
-
-      <!--<Button guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" />
-        <Icon guid="guidImages" id="bmpPic1" />
-        <Strings>
-          <ButtonText>Tabs Manager</ButtonText>
-        </Strings>
-      </Button>-->
-
-
-      <Button guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100" type="Button">
-        <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" />
-        <Icon guid="guidImages" id="bmpPic1" />
-        <Strings>
-          <ButtonText>Tabs Manager</ButtonText>
+          <ButtonText>Toggle Tabs Manager</ButtonText>
+          <CommandName>ToggleTabsManager</CommandName>
         </Strings>
       </Button>
     </Buttons>
@@ -89,6 +37,12 @@
       <Bitmap guid="guidImages" href="Resources\TabsManagerToolWindowCommand.png" usedList="bmpPic1, bmpPic2, bmpPicSearch, bmpPicX, bmpPicArrows, bmpPicStrikethrough"/>
     </Bitmaps>
   </Commands>
+
+  <CommandPlacements>
+    <CommandPlacement guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100">
+      <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" />
+    </CommandPlacement>
+  </CommandPlacements>
 
   <Symbols>
     <!-- This is the package guid. -->

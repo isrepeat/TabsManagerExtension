@@ -42,7 +42,7 @@
                                      Padding="4,2"
                                      VerticalContentAlignment="Center"
                                      HorizontalAlignment="Stretch"
-                                     Visibility="{Binding IsEditable, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                     Visibility="{Binding IsEditable, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BooleanToVisibilityConverter}}"
                                      Text="{Binding Text, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
                                      IsReadOnly="False"
                                      IsHitTestVisible="True"
@@ -58,7 +58,7 @@
                                 VerticalAlignment="Center"
                                 HorizontalAlignment="Left"
                                 IsHitTestVisible="False"
-                                Visibility="{Binding IsEditable, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
+                                Visibility="{Binding IsEditable, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource InvertedBooleanToVisibilityConverter}}"
                                 />
                             <!-- Кнопка открытия списка -->
                             <ToggleButton x:Name="PART_DropDownToggle" 

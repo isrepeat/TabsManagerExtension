@@ -18,6 +18,8 @@ using System.ComponentModel.Design;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.Utilities.UnifiedSettings;
 using Microsoft.VisualStudio.VCProjectEngine;
 using Microsoft.VisualStudio.VCCodeModel;
 using Microsoft.VisualStudio.TextManager.Interop;
@@ -26,6 +28,8 @@ using Task = System.Threading.Tasks.Task;
 
 namespace TabsManagerExtension {
     public class VsixVisualTreeHelper : Helpers.ObservableObject {
+        private const string DocumentTabsLayoutSetting = "environment.tabs.documentTabs.layout";
+
         private static readonly VsixVisualTreeHelper _instance = new();
         public static VsixVisualTreeHelper Instance => _instance;
 
@@ -53,6 +57,43 @@ namespace TabsManagerExtension {
         private WeakReference<UIElement>? _lastInjectedContent;
 
         private VsixVisualTreeHelper() {
+        }
+
+        /// <summary>
+        /// The custom tab control replaces PART_TabListHost and therefore inherits the host placement
+        /// selected by Visual Studio. Keep the standard host on the left before injecting our control.
+        /// </summary>
+        public void EnsureStandardDocumentTabsOnLeft() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            try {
+                var componentModel = Package.GetGlobalService(typeof(SComponentModel)) as IComponentModel;
+                var settingsWriter = componentModel?.GetService<ISettingsWriter>();
+                if (settingsWriter == null) {
+                    Helpers.Diagnostic.Logger.LogWarning("Unified settings writer is unavailable.");
+                    return;
+                }
+
+                var currentLayout = settingsWriter.GetValueOrThrow<string>(DocumentTabsLayoutSetting);
+                if (string.Equals(currentLayout, "left", StringComparison.OrdinalIgnoreCase)) {
+                    return;
+                }
+
+                var changeResult = settingsWriter.EnqueueChange(DocumentTabsLayoutSetting, "left");
+                if (!changeResult.CommitWillChangeEffectiveValue) {
+                    Helpers.Diagnostic.Logger.LogWarning(
+                        $"Unable to change '{DocumentTabsLayoutSetting}': {changeResult.Message}");
+                    return;
+                }
+
+                var commitResult = settingsWriter.RequestCommit("Tabs Manager requires document tabs on the left");
+                Helpers.Diagnostic.Logger.LogDebug(
+                    $"Changed '{DocumentTabsLayoutSetting}' from '{currentLayout}' to 'left': {commitResult}");
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogError(
+                    $"Failed to set '{DocumentTabsLayoutSetting}' to 'left': {ex}");
+            }
         }
 
         /// <summary>

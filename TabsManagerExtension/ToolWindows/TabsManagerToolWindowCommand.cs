@@ -70,6 +70,11 @@ namespace TabsManagerExtension.ToolWindows {
 
         private async void Execute(object sender, EventArgs e) {
             VsixVisualTreeHelper.Instance.ToggleCustomTabs();
+
+            var statusBar = await this.package.GetServiceAsync(typeof(SVsStatusbar)) as IVsStatusbar;
+            statusBar?.SetText(VsixVisualTreeHelper.Instance.IsCustomTabsEnabled
+                ? "Tabs Manager: custom tabs enabled"
+                : "Tabs Manager: standard tabs restored");
             
             //this.TestIncludeDependencyAnalyzer();
             //Helpers.Diagnostic.Logger.LogDebug($"Solution hierarchy:");

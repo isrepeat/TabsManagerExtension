@@ -23,6 +23,9 @@ using Microsoft.VisualStudio.VCCodeModel;
 using Microsoft.VisualStudio.TextManager.Interop;
 using Task = System.Threading.Tasks.Task;
 
+// Add AUTO_ENABLE_CUSTOM_TABS to DefineConstants to restore automatic left layout
+// and tab replacement. Keep it undefined while diagnosing manual activation.
+
 [assembly: Helpers.Attributes.CodeAnalyzerEnableLogs]
 
 #if NET_FRAMEWORK_472
@@ -64,6 +67,7 @@ namespace TabsManagerExtension {
 
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
             await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
+            this.ShowLoadedStatusAfterShellBecomesIdle();
         }
 
 
@@ -79,14 +83,35 @@ namespace TabsManagerExtension {
         private void OnSolutionLoaded(string solutionName) {
             Helpers.Diagnostic.Logger.LogDebug($"[Package] OnSolutionLoaded(): solutionName = {solutionName}");
             PackageServices.Invalidate();
+            this.ShowLoadedStatusAfterShellBecomesIdle();
 
+#if AUTO_ENABLE_CUSTOM_TABS
             if (VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
                 return;
             }
 
             VsixThreadHelper.RunOnVsThread(() => {
-                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
+                VsixVisualTreeHelper.Instance.EnsureStandardDocumentTabsOnLeft();
+
+                // Changing the standard tab layout recreates PART_TabListHost. Inject only after
+                // Visual Studio has had a chance to apply the unified setting and rebuild its UI.
+                Application.Current.Dispatcher.BeginInvoke(new Action(() => {
+                    VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
+                }), DispatcherPriority.ApplicationIdle);
             });
+#endif
+        }
+
+        private void ShowLoadedStatusAfterShellBecomesIdle() {
+            this.JoinableTaskFactory.RunAsync(async () => {
+                // Solution loading writes its own status messages after package initialization.
+                // Wait until those messages finish so the activation confirmation remains visible.
+                await Task.Delay(TimeSpan.FromSeconds(2), this.DisposalToken);
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
+
+                var statusBar = await this.GetServiceAsync(typeof(SVsStatusbar)) as IVsStatusbar;
+                statusBar?.SetText("Tabs Manager loaded — use Tools > Toggle Tabs Manager");
+            }).FileAndForget("TabsManagerExtension/ShowLoadedStatus");
         }
 
 
@@ -94,6 +119,7 @@ namespace TabsManagerExtension {
             Helpers.Diagnostic.Logger.LogDebug($"[Package] OnSolutionClosed(): solutionName = {solutionName}");
             PackageServices.Invalidate();
 
+#if AUTO_ENABLE_CUSTOM_TABS
             if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
                 return;
             }
@@ -101,6 +127,7 @@ namespace TabsManagerExtension {
             VsixThreadHelper.RunOnVsThread(() => {
                 VsixVisualTreeHelper.Instance.ToggleCustomTabs(false);
             });
+#endif
         }
     }
 }
