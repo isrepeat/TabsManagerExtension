@@ -2,7 +2,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.0.11112.94
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TestIncludeProject", "TestIncludeProject\TestIncludeProject.vcxproj", "{D6E4AD13-549D-4F25-A9E8-966D2B277DB4}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Game", "Game\Game.vcxproj", "{11B0A653-44C1-4CC9-81E5-BCE5523031A1}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Editor", "Editor\Editor.vcxproj", "{22C1B764-55D2-4DDA-92F6-CDF6634142B2}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Engine", "Engine\Engine.vcxproj", "{33D2C875-66E3-4EEB-A307-DEF7745253C3}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Helpers.Shared", "Helpers.Shared\Helpers.Shared.vcxitems", "{44E3D986-77F4-4FFC-B418-EF08856364D4}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -10,12 +16,26 @@ Global
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{D6E4AD13-549D-4F25-A9E8-966D2B277DB4}.Debug|x64.ActiveCfg = Debug|x64
-		{D6E4AD13-549D-4F25-A9E8-966D2B277DB4}.Debug|x64.Build.0 = Debug|x64
-		{D6E4AD13-549D-4F25-A9E8-966D2B277DB4}.Release|x64.ActiveCfg = Release|x64
-		{D6E4AD13-549D-4F25-A9E8-966D2B277DB4}.Release|x64.Build.0 = Release|x64
+		{11B0A653-44C1-4CC9-81E5-BCE5523031A1}.Debug|x64.ActiveCfg = Debug|x64
+		{11B0A653-44C1-4CC9-81E5-BCE5523031A1}.Debug|x64.Build.0 = Debug|x64
+		{11B0A653-44C1-4CC9-81E5-BCE5523031A1}.Release|x64.ActiveCfg = Release|x64
+		{11B0A653-44C1-4CC9-81E5-BCE5523031A1}.Release|x64.Build.0 = Release|x64
+		{22C1B764-55D2-4DDA-92F6-CDF6634142B2}.Debug|x64.ActiveCfg = Debug|x64
+		{22C1B764-55D2-4DDA-92F6-CDF6634142B2}.Debug|x64.Build.0 = Debug|x64
+		{22C1B764-55D2-4DDA-92F6-CDF6634142B2}.Release|x64.ActiveCfg = Release|x64
+		{22C1B764-55D2-4DDA-92F6-CDF6634142B2}.Release|x64.Build.0 = Release|x64
+		{33D2C875-66E3-4EEB-A307-DEF7745253C3}.Debug|x64.ActiveCfg = Debug|x64
+		{33D2C875-66E3-4EEB-A307-DEF7745253C3}.Debug|x64.Build.0 = Debug|x64
+		{33D2C875-66E3-4EEB-A307-DEF7745253C3}.Release|x64.ActiveCfg = Release|x64
+		{33D2C875-66E3-4EEB-A307-DEF7745253C3}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		Helpers.Shared\Helpers.Shared.vcxitems*{11b0a653-44c1-4cc9-81e5-bce5523031a1}*SharedItemsImports = 4
+		Helpers.Shared\Helpers.Shared.vcxitems*{22c1b764-55d2-4dda-92f6-cdf6634142b2}*SharedItemsImports = 4
+		Helpers.Shared\Helpers.Shared.vcxitems*{33d2c875-66e3-4eeb-a307-def7745253c3}*SharedItemsImports = 4
+		Helpers.Shared\Helpers.Shared.vcxitems*{44e3d986-77f4-4ffc-b418-ef08856364d4}*SharedItemsImports = 9
 	EndGlobalSection
 EndGlobal
