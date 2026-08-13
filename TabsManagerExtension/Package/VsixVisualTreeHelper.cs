@@ -244,6 +244,7 @@ namespace TabsManagerExtension {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope($"ToggleCustomTabs({enable})");
 
             ThreadHelper.ThrowIfNotOnUIThread();
+            Configuration.TabsManagerConfigurationService.SetAutoLoadCustomTabs(enable);
 
             if (enable) {
                 if (!this.IsCustomTabsEnabled) {

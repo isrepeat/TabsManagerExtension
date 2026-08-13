@@ -33,6 +33,9 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
+    <!-- VSIX deploy не является частью Fast Up-to-date Check. Всегда запускаем MSBuild перед F5,
+         чтобы не стартовать Experimental Instance со старой DLL после неудачного deploy. -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
     <DeployExtension>true</DeployExtension>
     <Optimize>false</Optimize>
     <OutputPath>bin\Debug\</OutputPath>
@@ -67,6 +70,8 @@
     <DefineConstants>$(DefineConstants);VSSDK</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Configuration\TabsManagerConfiguration.cs" />
+    <Compile Include="Configuration\TabsManagerConfigurationService.cs" />
     <Compile Include="Controls\MenuControl.xaml.cs">
       <DependentUpon>MenuControl.xaml</DependentUpon>
     </Compile>

@@ -94,6 +94,8 @@ namespace TabsManagerExtension.Controls {
 
         private DispatcherTimer _tabsManagerStateTimer;
         private FileSystemWatcher _fileWatcher;
+        private bool _isRestoringToolWindows;
+        private bool _isSolutionClosing;
 
         private Helpers.Collections.GroupsSelectionCoordinator<TabItemsGroupBase, TabItemBase> _tabItemsSelectionCoordinator;
         private VsShell.TextEditor.Overlay.TextEditorOverlayController _textEditorOverlayController;
@@ -146,6 +148,7 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            this.SaveOpenToolWindows();
             this.UninitializeTabItemsSelectionCoordinator();
             this.UninitializeVsShellTrackers();
             this.UninitializeFileWatcher();
@@ -440,6 +443,7 @@ namespace TabsManagerExtension.Controls {
             addedOrExistTabItem.IsSelected = true;
 
             this.UpdateWindowTabsInfo();
+            this.SaveOpenToolWindows();
 
             _textEditorOverlayController.Update();
         }
@@ -450,12 +454,18 @@ namespace TabsManagerExtension.Controls {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             Helpers.Diagnostic.Logger.LogParam($"closingWindow.Caption = {closingWindow?.Caption}");
+            Dispatcher.BeginInvoke(new Action(this.SaveOpenToolWindows), DispatcherPriority.Background);
         }
 
 
         private void OnSolutionClosing() {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnSolutionClosing()");
             ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Сохраняем снимок до того, как Visual Studio начнёт последовательно закрывать окна.
+            // Иначе WindowClosing в конце завершения IDE перезапишет историю пустым списком.
+            this.SaveOpenToolWindows();
+            _isSolutionClosing = true;
 
             // TODO: try replace with this.Unload()
             this.SortedTabItemsGroups.Clear();
@@ -784,31 +794,56 @@ namespace TabsManagerExtension.Controls {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnCloseTabItem()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (parameter is TabItemBase tabItem) {
-                if (tabItem is TabItemDocument tabItemDocument) {
-                    Helpers.Diagnostic.Logger.LogDebug($"close document \"{tabItemDocument.ShellDocument.Document.FullName}\"");
-                    tabItemDocument.ShellDocument.Document.Close();
-                    // Удаление произойдёт через OnDocumentClosing
-                }
-                else if (tabItem is TabItemWindow tabItemWindow) {
-                    Helpers.Diagnostic.Logger.LogDebug($"close window \"{tabItemWindow.ShellWindow.Window.Caption}\"");
-                    tabItemWindow.ShellWindow.Window.Close();
-
-                    // Удаляем вручную, так как события не будет
-                    this.RemoveTabItemFromGroups(tabItemWindow);
-                }
-
-                this.VirtualMenuControl.HideImmediately();
+            if (parameter is not TabItemBase tabItem) {
+                return;
             }
+
+            var selectedItems = _tabItemsSelectionCoordinator.SelectedItems;
+            bool closeSelection = selectedItems.Count > 1 && selectedItems.Any(entry => ReferenceEquals(entry.Item, tabItem));
+            var itemsToClose = closeSelection
+                ? selectedItems.Select(entry => entry.Item).ToList()
+                : new List<TabItemBase> { tabItem };
+
+            this.CloseTabItems(itemsToClose);
         }
 
         private void OnCloseSelectedTabItems(object parameter) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnCloseSelectedTabItems()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (parameter is TabItemBase tabItem) {
-                this.VirtualMenuControl.HideImmediately();
+            var itemsToClose = _tabItemsSelectionCoordinator.SelectedItems
+                .Select(entry => entry.Item)
+                .ToList();
+
+            this.CloseTabItems(itemsToClose);
+        }
+
+        private void CloseTabItems(IReadOnlyList<TabItemBase> tabItems) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Используем заранее созданный снимок: DocumentClosing синхронно удаляет элементы
+            // из групп и одновременно перестраивает текущее выделение.
+            foreach (var tabItem in tabItems) {
+                try {
+                    if (tabItem is TabItemDocument tabItemDocument) {
+                        Helpers.Diagnostic.Logger.LogDebug($"close document \"{tabItemDocument.ShellDocument.Document.FullName}\"");
+                        tabItemDocument.ShellDocument.Document.Close();
+                        // Документ будет удалён через OnDocumentClosing.
+                    }
+                    else if (tabItem is TabItemWindow tabItemWindow) {
+                        Helpers.Diagnostic.Logger.LogDebug($"close window \"{tabItemWindow.ShellWindow.Window.Caption}\"");
+                        tabItemWindow.ShellWindow.Window.Close();
+
+                        // Для tool window событие DocumentClosing не приходит.
+                        this.RemoveTabItemFromGroups(tabItemWindow);
+                    }
+                }
+                catch (Exception ex) {
+                    Helpers.Diagnostic.Logger.LogError($"Failed to close tab '{tabItem.Caption}': {ex}");
+                }
             }
+
+            this.VirtualMenuControl.HideImmediately();
         }
 
         private void OnKeepOpenedTabItem(object parameter) {
@@ -919,7 +954,7 @@ namespace TabsManagerExtension.Controls {
                                 this.ContextMenuItems = new ObservableCollection<Helpers.IMenuItem> {
                                     new Helpers.MenuItemCommand {
                                         Header = State.Constants.UI.CloseSelectedTabs,
-                                        Command = new Helpers.RelayCommand<object>(this.OnCloseTabItem),
+                                        Command = new Helpers.RelayCommand<object>(this.OnCloseSelectedTabItems),
                                         CommandParameterContext = contextMenuOpeningArgs.DataContext,
                                     }
                                 };
@@ -1063,15 +1098,13 @@ namespace TabsManagerExtension.Controls {
 
             this.SortedTabItemsGroups.ToList();
             this.SortedTabItemsGroups.Clear();
+            this.RestoreToolWindows();
+
             foreach (EnvDTE.Document document in PackageServices.Dte2.Documents) {
                 var tabItemDocument = new TabItemDocument(document);
                 this.AddTabItemToAutoDeterminedGroupIfMissing(tabItemDocument);
             }
 
-            // NOTE: В стандартном TabsManager открытыие окна [ToolWindows] сохраняются с предыдущей сессии
-            // видимо в конфиг файле, т.к. среди _dte.Windows их нет.
-            //
-            // TODO: Добавляй ToolWindows не из открытых окон, а из конфиг файла хранящего предыдущую сессию.
             foreach (EnvDTE.Window window in PackageServices.Dte2.Windows) {
                 if (window.Document != null) {
                     continue; // skip documents
@@ -1095,6 +1128,52 @@ namespace TabsManagerExtension.Controls {
                     _textEditorOverlayController.Update();
                 }
             }), DispatcherPriority.Background);
+        }
+
+        private void RestoreToolWindows() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var uiShell = Package.GetGlobalService(typeof(SVsUIShell)) as IVsUIShell;
+            if (uiShell == null) {
+                return;
+            }
+
+            _isRestoringToolWindows = true;
+            try {
+                foreach (var windowId in Configuration.TabsManagerConfigurationService.OpenToolWindowIds) {
+                    if (!Guid.TryParse(windowId, out var persistenceGuid)) {
+                        continue;
+                    }
+
+                    try {
+                        var result = uiShell.FindToolWindow((uint)__VSFINDTOOLWIN.FTW_fForceCreate, ref persistenceGuid, out var frame);
+                        if (ErrorHandler.Succeeded(result)) {
+                            frame?.Show();
+                        }
+                    }
+                    catch (Exception ex) {
+                        Helpers.Diagnostic.Logger.LogWarning($"Failed to restore tool window '{windowId}': {ex.Message}");
+                    }
+                }
+            }
+            finally {
+                _isRestoringToolWindows = false;
+            }
+        }
+
+        private void SaveOpenToolWindows() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_isRestoringToolWindows || _isSolutionClosing) {
+                return;
+            }
+
+            var windowIds = PackageServices.Dte2.Windows
+                .Cast<EnvDTE.Window>()
+                .Where(window => window.Document == null && VsShell.Document.ShellWindow.IsTabWindow(window))
+                .Select(VsShell.Document.ShellWindow.GetWindowId);
+
+            Configuration.TabsManagerConfigurationService.SetOpenToolWindowIds(windowIds);
         }
 
 
