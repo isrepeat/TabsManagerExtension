@@ -1,0 +1,11 @@
+root = true
+
+# Общие правила для текстовых файлов проекта.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+# Visual Studio традиционно сохраняет исходный код .NET/C++ с сигнатурой UTF-8 (BOM).
+[*.{cs,cpp,h,hpp,hlsl}]
+charset = utf-8-bom
