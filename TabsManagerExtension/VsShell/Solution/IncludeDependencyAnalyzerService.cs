@@ -29,6 +29,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private string _lastLoadedSolutionName;
         private bool _buildingSolutionGraphInProcess = false;
         private bool _buildingProjectGraphInProcess = false;
+        private volatile bool _isShuttingDown = false;
 
         public IncludeDependencyAnalyzerService() { }
 
@@ -46,18 +47,21 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         public void Initialize() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            // DispatcherTimer выполняет отложенную обработку изменений файлов в UI-потоке.
+            // Создаём его до InvokeForLastHandlerIfTriggered(): этот вызов немедленно сообщает сервису
+            // о ранее открытом решении и может запустить наблюдение за файлами прямо внутри Initialize().
+            // Если таймер создать позже, первое событие изменения файла обратится к полю со значением null.
+            _isShuttingDown = false;
+            _delayedFileChangeTimer = new DispatcherTimer {
+                Interval = TimeSpan.FromMilliseconds(300)
+            };
+            _delayedFileChangeTimer.Tick += (_, _) => this.OnDelayedFileChangeTimerTick();
+
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
 
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded += this.OnProjectLoaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded += this.OnProjectUnloaded;
-
-            // Используем таймер для отложенной обработки изменённых файлов:
-            // обработка произойдёт только через заданный интервал после последнего события.
-            _delayedFileChangeTimer = new DispatcherTimer {
-                Interval = TimeSpan.FromMilliseconds(300)
-            };
-            _delayedFileChangeTimer.Tick += (_, _) => this.OnDelayedFileChangeTimerTick();
 
             Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Initialized.");
         }
@@ -65,7 +69,23 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         public void Shutdown() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            _isShuttingDown = true;
             _delayedFileChangeTimer.Stop();
+
+            // Наблюдатель файлов работает в фоне и может прислать событие одновременно с остановкой сервиса.
+            // Сначала отписываемся от него и освобождаем его ресурсы, чтобы после Shutdown не появилась
+            // новая отложенная задача, обращающаяся к уже остановленному таймеру.
+            if (_solutionDirWatcher != null) {
+                _solutionDirWatcher.DirectoryChanged -= this.OnSolutionDirectoryChanged;
+                _solutionDirWatcher.Dispose();
+                _solutionDirWatcher = null;
+            }
+            _msBuildSolutionWatcher?.Dispose();
+
+            lock (_pendingChangedFiles) {
+                _pendingChangedFiles.Clear();
+            }
+
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded -= this.OnProjectUnloaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded -= this.OnProjectLoaded;
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Remove(this.OnSolutionLoaded);
@@ -316,17 +336,39 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
 
         private void OnSolutionDirectoryChanged(Helpers.DirectoryChangedEventArgs e) {
+            if (_isShuttingDown) {
+                return;
+            }
+
             lock (_pendingChangedFiles) {
                 _pendingChangedFiles.Add(e);
             }
 
-            _delayedFileChangeTimer.Stop();
-            _delayedFileChangeTimer.Start();
+            // Событие об изменении файла приходит из фонового потока. DispatcherTimer можно безопасно
+            // запускать только в UI-потоке, в котором он был создан. BeginInvoke передаёт перезапуск
+            // таймера в очередь UI-потока; без этого два потока могли одновременно менять его состояние.
+            _delayedFileChangeTimer.Dispatcher.BeginInvoke(
+                new Action(
+                    () => {
+                        if (_isShuttingDown) {
+                            return;
+                        }
+
+                        _delayedFileChangeTimer.Stop();
+                        _delayedFileChangeTimer.Start();
+                    }
+                ),
+                DispatcherPriority.Background
+            );
         }
 
 
         private void OnDelayedFileChangeTimerTick() {
             _delayedFileChangeTimer.Stop();
+
+            if (_isShuttingDown) {
+                return;
+            }
 
             List<Helpers.DirectoryChangedEventArgs> changedFiles;
             lock (_pendingChangedFiles) {
@@ -358,7 +400,11 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 _buildingSolutionGraphInProcess = true;
 
                 _msBuildSolutionWatcher?.Dispose();
-                _solutionDirWatcher?.Dispose();
+                if (_solutionDirWatcher != null) {
+                    _solutionDirWatcher.DirectoryChanged -= this.OnSolutionDirectoryChanged;
+                    _solutionDirWatcher.Dispose();
+                    _solutionDirWatcher = null;
+                }
 
 
                 var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;

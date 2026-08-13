@@ -37,14 +37,17 @@ namespace System.Runtime.CompilerServices {
 
 namespace TabsManagerExtension {
     /// <summary>
-    /// Благодаря <b>[ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]</b>
-    /// новоустановленный пакет загрузиться в бэкграунде (через ~5c), после загрузки решения.
-    /// Далее мы используем EarlyPackageLoadHackToolWindow, чтобы пакет загружался сразу при запуске VS.
+    /// ProvideAutoLoad просит Visual Studio автоматически загрузить расширение в фоновом режиме.
+    /// NoSolution действует, когда решение не открыто, а SolutionExists — когда решение открыто.
+    /// Поэтому расширение загружается в обоих возможных состояниях Visual Studio без старого хака с Tool Window.
     /// </summary>
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
+    [ProvideAutoLoad(UIContextGuids80.NoSolution, PackageAutoLoadFlags.BackgroundLoad)]
     [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
     [ProvideMenuResource("Menus.ctmenu", 1)]
+#if ENABLE_EARLY_PACKAGE_LOAD_HACK
     [ProvideToolWindow(typeof(ToolWindows.EarlyPackageLoadHackToolWindow))]
+#endif
     [ProvideToolWindow(typeof(ToolWindows.TabsManagerToolWindow))]
     [Guid(TabsManagerExtensionPackage.PackageGuidString)]
     public sealed class TabsManagerExtensionPackage : AsyncPackage {
@@ -65,7 +68,9 @@ namespace TabsManagerExtension {
 
             this.InitializeEvents();
 
+#if ENABLE_EARLY_PACKAGE_LOAD_HACK
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
+#endif
             await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
             this.ShowLoadedStatusAfterShellBecomesIdle();
         }
@@ -91,13 +96,7 @@ namespace TabsManagerExtension {
             }
 
             VsixThreadHelper.RunOnVsThread(() => {
-                VsixVisualTreeHelper.Instance.EnsureStandardDocumentTabsOnLeft();
-
-                // Changing the standard tab layout recreates PART_TabListHost. Inject only after
-                // Visual Studio has had a chance to apply the unified setting and rebuild its UI.
-                Application.Current.Dispatcher.BeginInvoke(new Action(() => {
-                    VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
-                }), DispatcherPriority.ApplicationIdle);
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
             });
 #endif
         }

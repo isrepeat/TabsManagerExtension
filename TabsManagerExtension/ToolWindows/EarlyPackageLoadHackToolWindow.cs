@@ -1,4 +1,9 @@
 ﻿//#define OLD_LOGIC
+// Раньше скрытое Tool Window использовалось как обходной способ заставить Visual Studio
+// загрузить расширение раньше. Теперь расширение загружают атрибуты ProvideAutoLoad в классе пакета.
+// Старый код оставлен только для диагностики: чтобы включить его, добавьте
+// ENABLE_EARLY_PACKAGE_LOAD_HACK в список DefineConstants проекта.
+#if ENABLE_EARLY_PACKAGE_LOAD_HACK
 using System;
 using System.Drawing;
 using System.IO.Packaging;
@@ -266,3 +271,4 @@ namespace TabsManagerExtension.ToolWindows {
         }
     }
 }
+#endif
