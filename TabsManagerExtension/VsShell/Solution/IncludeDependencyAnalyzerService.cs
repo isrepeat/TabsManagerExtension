@@ -310,6 +310,11 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             var loadedProject = solutionHierarchyAnalyzer.LoadedProjects
                 .FirstOrDefault(p => p.ProjectGuid == projectGuid);
 
+            if (loadedProject == null) {
+                Helpers.Diagnostic.Logger.LogWarning($"Skip project graph update: project '{projectGuid}' is absent from the solution hierarchy analyzer.");
+                return;
+            }
+
             this.UpdateProjectGraph(loadedProject);
         }
 

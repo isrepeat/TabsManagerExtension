@@ -106,7 +106,24 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 if (dictFilePathToDocument.TryGetValue(documentPath, out var documentEntryBase)) {
                     return documentEntryBase;
                 }
+
+                var sameFileNamePaths = dictFilePathToDocument.Keys
+                    .Where(path => string.Equals(
+                        Path.GetFileName(path),
+                        Path.GetFileName(documentPath),
+                        StringComparison.OrdinalIgnoreCase
+                    ))
+                    .ToList();
+
+                Helpers.Diagnostic.Logger.LogDebug($"[RepresentationsTable] Document lookup failed: Project='{projectEntry.BaseViewModel.UniqueName}', Guid='{projectEntry.BaseViewModel.ProjectGuid}', RequestedPath='{documentPath}', ProjectBucketFound=true, BucketCount={dictFilePathToDocument.Count}, SameFileNamePaths=[{string.Join("; ", sameFileNamePaths.Select(path => $"'{path}'"))}].");
+                return null;
             }
+
+            var knownProjectKeys = _mapProjectToDictFilePathToDocument.Keys
+                .Select(p => $"'{p.BaseViewModel.UniqueName}' ({p.BaseViewModel.ProjectGuid})")
+                .ToList();
+
+            Helpers.Diagnostic.Logger.LogDebug($"[RepresentationsTable] Document lookup failed: Project='{projectEntry.BaseViewModel.UniqueName}', Guid='{projectEntry.BaseViewModel.ProjectGuid}', RequestedPath='{documentPath}', ProjectBucketFound=false, KnownProjects=[{string.Join("; ", knownProjectKeys)}].");
             return null;
         }
 
@@ -117,6 +134,13 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             if (_mapProjectViewModelToProjectEntry.TryGetValue(projectViewModel, out var projectEntry)) {
                 return this.GetDocumentByProjectAndDocumentPath(projectEntry, documentPath);
             }
+
+            var sameGuidProjectEntries = _mapProjectViewModelToProjectEntry
+                .Where(pair => pair.Key.ProjectGuid == projectViewModel.ProjectGuid)
+                .Select(pair => $"ViewModel='{pair.Key.UniqueName}', Entry='{pair.Value.BaseViewModel.UniqueName}'")
+                .ToList();
+
+            Helpers.Diagnostic.Logger.LogDebug($"[RepresentationsTable] Project lookup failed: Project='{projectViewModel.UniqueName}', Guid='{projectViewModel.ProjectGuid}', RequestedPath='{documentPath}', ViewModelKeyFound=false, SameGuidEntries=[{string.Join("; ", sameGuidProjectEntries)}].");
             return null;
         }
     }
@@ -373,6 +397,17 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     continue;
                 }
 
+                var vsSolution2 = (IVsSolution2)vsSolution;
+                vsSolution2.GetProjrefOfProject(vsHierarchy, out var projRef);
+
+                var projRefParts = projRef?.Split('|');
+                var uniqueName = projRefParts?.Length > 1 ? projRefParts[1] : null;
+                if (string.IsNullOrEmpty(uniqueName) || uniqueName.IndexOfAny(Path.GetInvalidPathChars()) >= 0) {
+                    // EPF_ALLINSOLUTION также возвращает служебные hierarchy, например <MiscFiles>.
+                    Helpers.Diagnostic.Logger.LogDebug($"[SolutionHierarchyAnalyzerService] Skip non-file project hierarchy: '{projRef}'.");
+                    continue;
+                }
+
                 Project.ProjectEntry projectEntry = null;
 
                 if (Utils.VsHierarchyUtils.IsRealHierarchy(vsHierarchy)) {
@@ -404,7 +439,9 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     projectEntry.MultiState.SwitchTo<Project.UnloadedProject>();
                 }
 
-                _solutionProjects.Add(projectEntry);
+                if (projectEntry != null) {
+                    _solutionProjects.Add(projectEntry);
+                }
             }
         }
 

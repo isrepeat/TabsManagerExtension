@@ -83,6 +83,14 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 var dteProject = Utils.EnvDteUtils.GetDteProjectFromHierarchy(pHierarchy);
                 Helpers.Diagnostic.Logger.LogDebug($"[VsSolutionEventsTrackerService] OnAfterOpenProject(): {dteProject?.UniqueName}");
 
+                // Visual Studio присылает это событие и для виртуального проекта <MiscFiles>,
+                // когда пользователь открывает произвольный файл через File -> Open -> File.
+                // Такая hierarchy не входит в solution и не должна попадать в анализаторы проектов.
+                if (dteProject == null || Utils.EnvDteUtils.IsMiscProject(dteProject)) {
+                    Helpers.Diagnostic.Logger.LogDebug("[VsSolutionEventsTrackerService] Skip non-solution project hierarchy.");
+                    return VSConstants.S_OK;
+                }
+
                 var newHierarchyItemEntry = Hierarchy.HierarchyItemEntry.CreateWithState<Hierarchy.RealHierarchyItem>(
                     new Hierarchy.HierarchyItemMultiStateElement(
                         pHierarchy,

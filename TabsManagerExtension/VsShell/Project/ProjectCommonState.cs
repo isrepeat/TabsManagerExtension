@@ -78,7 +78,13 @@ namespace TabsManagerExtension.VsShell.Project {
                         this.UniqueName = parts[1];
 
                         var solutionDir = Path.GetDirectoryName(PackageServices.Dte2.Solution.FullName);
-                        this.FullName = Path.GetFullPath(Path.Combine(solutionDir, this.UniqueName));
+                        if (!string.IsNullOrEmpty(solutionDir) && this.UniqueName.IndexOfAny(Path.GetInvalidPathChars()) < 0) {
+                            this.FullName = Path.GetFullPath(Path.Combine(solutionDir, this.UniqueName));
+                        }
+                        else {
+                            // Виртуальные hierarchy вроде <MiscFiles> не имеют физического пути проекта.
+                            Helpers.Diagnostic.Logger.LogDebug($"[ProjectCommonState] Skip non-file project reference: '{projRef}'.");
+                        }
                     }
                 }
 
