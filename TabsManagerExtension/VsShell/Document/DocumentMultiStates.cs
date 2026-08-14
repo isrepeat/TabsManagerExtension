@@ -111,6 +111,11 @@ namespace TabsManagerExtension.VsShell.Document {
             // Это нужно для того, чтобы при открытии внешнего include файла
             // Visual Studio знала, что контекстом открытия является именно этот проект.
             var includeDependencyAnalyzer = VsShell.Solution.Services.IncludeDependencyAnalyzerService.Instance;
+            if (!includeDependencyAnalyzer.IsReady()) {
+                Helpers.Diagnostic.Logger.LogWarning("[Document.OpenWithProjectContext] Include dependency graph is not ready.");
+                return;
+            }
+
             var allTransitiveIncludingFiles = includeDependencyAnalyzer
                 .GetTransitiveFilesIncludersByIncludePath(base.HierarchyItemEntry.BaseViewModel.FilePath);
 

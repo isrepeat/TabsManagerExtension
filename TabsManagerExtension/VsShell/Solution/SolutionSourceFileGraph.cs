@@ -27,7 +27,7 @@ namespace TabsManagerExtension.VsShell.Solution {
     /// </summary>
 
     public class SolutionSourceFileGraph {
-        public IEnumerable<Document.SourceFile> AllSourceFiles => _sourceFileToResolvedIncludeEntriesMap.Keys;
+        public IEnumerable<Document.SourceFile> AllSourceFiles => _sourceFileToResolvedIncludeEntriesMap.Keys.ToList();
 
         private readonly Dictionary<Document.SourceFile, List<Document.IncludeEntry>> _sourceFileToIncludeEntriesMap = new();
         private readonly Dictionary<Document.IncludeEntry, List<Document.SourceFile>> _includeEntryToSourceFilesMap = new();
@@ -65,7 +65,14 @@ namespace TabsManagerExtension.VsShell.Solution {
         }
 
         public IEnumerable<KeyValuePair<Document.SourceFile, List<Document.ResolvedIncludeEntry>>> GetAllResolvedIncludeEntries() {
-            return _sourceFileToResolvedIncludeEntriesMap;
+            return _sourceFileToResolvedIncludeEntriesMap
+                .Select(
+                    pair => new KeyValuePair<Document.SourceFile, List<Document.ResolvedIncludeEntry>>(
+                        pair.Key,
+                        pair.Value.ToList()
+                    )
+                )
+                .ToList();
         }
 
         public IEnumerable<Document.ResolvedIncludeEntry> GetResolvedIncludes(Document.SourceFile file) {
@@ -93,18 +100,44 @@ namespace TabsManagerExtension.VsShell.Solution {
             return Array.Empty<Document.SourceFile>();
         }
 
-        public IEnumerable<Document.SourceFile> GetSourceFilesByResolvedPath(string resolvedPath) {
+        /// <summary>
+        /// Возвращает все файлы, которые непосредственно включают заданный физический путь.
+        /// Например, для пути <c>Shared/Logger.h</c> метод вернёт <c>Game.cpp</c> и
+        /// <c>Editor.cpp</c>, если оба файла содержат include, разрешившийся в этот путь.
+        /// </summary>
+        public IEnumerable<Document.SourceFile> GetIncludersOfResolvedPath(string resolvedPath) {
             if (_resolvedIncludePathsToSourceFilesMap.TryGetValue(resolvedPath, out var list)) {
-                return list;
+                return list.ToList();
             }
 
             return Array.Empty<Document.SourceFile>();
         }
 
 
+        /// <summary>
+        /// Возвращает непосредственных включателей пути только в указанном проектном контексте.
+        /// </summary>
+        /// <remarks>
+        /// Один shared-файл может иметь несколько представлений. Например, <c>Shared/X.h [Game]</c>
+        /// может разрешать <c>Logger.h</c> в <c>Game/LocalIncludes/Logger.h</c>, а
+        /// <c>Shared/X.h [Editor]</c> — в <c>Helpers.Shared/Logger.h</c>. При подъёме по графу
+        /// нельзя переходить с ветки Game на включателей того же физического <c>X.h</c> из Editor.
+        /// </remarks>
+        public IEnumerable<Document.SourceFile> GetIncludersOfResolvedPath(
+            string resolvedPath,
+            VsShell.Project.LoadedProject projectContext
+        ) {
+            return this.GetIncludersOfResolvedPath(resolvedPath)
+                .Where(sourceFile => sourceFile.LoadedProject.ProjectGuid == projectContext.ProjectGuid)
+                .ToList();
+        }
+
+
         public bool TryGetSourceFileRepresentations(string filePath, out IReadOnlyList<Document.SourceFile> result) {
             if (_sourceFileRepresentationsMap.TryGetValue(filePath, out var list)) {
-                result = list;
+                // Не отдаём внутренний List наружу: удаление SourceFile во время обхода такого списка
+                // изменяло коллекцию под foreach и приводило к InvalidOperationException.
+                result = list.ToList();
                 return true;
             }
 
@@ -137,7 +170,7 @@ namespace TabsManagerExtension.VsShell.Solution {
             foreach (var includeEntry in includeEntries) {
                 // ② Резолвим путь (т.е. превращаем #include "Logger.h" в абсолютный/относительный путь если смогли)
                 string? resolvedPath = Services.IncludeResolverService.TryResolveInclude(
-                    includeEntry.RawInclude,
+                    includeEntry,
                     sourceFile.FilePath,
                     sourceFile.LoadedProject,
                     _msBuildSolutionWatcher

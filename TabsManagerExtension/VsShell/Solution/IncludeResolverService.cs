@@ -20,26 +20,38 @@ using Microsoft.VisualStudio.Package;
 namespace TabsManagerExtension.VsShell.Solution.Services {
     public static class IncludeResolverService {
         /// <summary>
-        /// Пробует разрешить include-строку в абсолютный путь.
+        /// Пробует разрешить include-запись в абсолютный путь с учётом её delimiter.
         /// Возвращает путь к файлу, если он существует; иначе — null.
         /// </summary>
         public static string? TryResolveInclude(
-            string includeRaw,
+            Document.IncludeEntry includeEntry,
             string includingFilePath,
             VsShell.Project.LoadedProject ownerProject,
             MsBuildSolutionWatcher msBuildSolutionWatcher) {
+
+            if (includeEntry.Kind == Document.IncludeKind.Macro) {
+                return null;
+            }
+
             try {
-                // ① Пробуем как относительный путь от файла
-                string baseDir = Path.GetDirectoryName(includingFilePath)!;
-                string resolvedLocal = Path.GetFullPath(Path.Combine(baseDir, includeRaw.Replace('/', '\\')));
-                if (File.Exists(resolvedLocal)) {
-                    return resolvedLocal;
+                string includePath = includeEntry.RawInclude.Replace('/', '\\');
+
+                // Quote include повторяет поведение MSVC: сначала каталог включающего файла,
+                // затем include environment. Для angle include локальный каталог пропускается.
+                // Например, <vector> не должен случайно разрешиться в Source/vector рядом с .cpp.
+                if (includeEntry.Kind == Document.IncludeKind.Quote) {
+                    string baseDir = Path.GetDirectoryName(includingFilePath)!;
+                    string resolvedLocal = Path.GetFullPath(Path.Combine(baseDir, includePath));
+                    if (File.Exists(resolvedLocal)) {
+                        return resolvedLocal;
+                    }
                 }
 
-                // ② Пробуем директории проекта
+                // Для обоих delimited-вариантов продолжаем поиск в evaluated include directories
+                // активной Configuration|Platform проекта.
                 var projectIncludeDirs = msBuildSolutionWatcher.GetIncludeDirectoriesFor(ownerProject.FullName);
                 foreach (var dir in projectIncludeDirs) {
-                    string resolved = Path.GetFullPath(Path.Combine(dir, includeRaw.Replace('/', '\\')));
+                    string resolved = Path.GetFullPath(Path.Combine(dir, includePath));
                     if (File.Exists(resolved)) {
                         return resolved;
                     }
@@ -52,6 +64,26 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             return null;
         }
 
+
+        /// <summary>
+        /// Совместимый со старым API overload. Строка без delimiter трактуется как quote include.
+        /// Для нового кода следует передавать <see cref="Document.IncludeEntry"/>, иначе различить
+        /// <c>"Header.h"</c> и <c>&lt;Header.h&gt;</c> невозможно.
+        /// </summary>
+        public static string? TryResolveInclude(
+            string includeRaw,
+            string includingFilePath,
+            VsShell.Project.LoadedProject ownerProject,
+            MsBuildSolutionWatcher msBuildSolutionWatcher) {
+
+            return TryResolveInclude(
+                new Document.IncludeEntry(includeRaw),
+                includingFilePath,
+                ownerProject,
+                msBuildSolutionWatcher
+            );
+        }
+
         ///// <summary>
         ///// Проверяет, разрешается ли includeRaw из includingFilePath в конкретный файл candidateFilePath.
         ///// </summary>
@@ -62,7 +94,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         //    VsShell.Project.ShellProject ownerProject,
         //    MsBuildSolutionWatcher msBuildSolutionWatcher) {
 
-        //    var resolved = TryResolveInclude(includeRaw, includingFilePath, ownerProject, msBuildSolutionWatcher);
+        //    var resolved = TryResolveInclude(includeEntry, includingFilePath, ownerProject, msBuildSolutionWatcher);
         //    if (resolved == null) {
         //        return false;
         //    }

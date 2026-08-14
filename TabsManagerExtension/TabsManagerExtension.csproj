@@ -112,6 +112,7 @@
     <Compile Include="VsShell\Project\VsProjectSharedItemsAnalyzer.cs" />
     <Compile Include="VsShell\Project\VsProjectSourcesAnalyzer.cs" />
     <Compile Include="VsShell\Solution\SolutionHierarchyAnalyzerService.cs" />
+    <Compile Include="VsShell\Solution\CppIncludeParser.cs" />
     <Compile Include="VsShell\VsCommandMapper.cs" />
     <Compile Include="VsShell\Project\ShellProject.cs" />
     <Compile Include="VsShell\Document\SourceFile.cs" />
