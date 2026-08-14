@@ -1,0 +1,54 @@
+/**
+@page service_lifecycle Жизненный цикл сервисов расширения
+
+@tableofcontents
+
+`TabsManagerExtensionPackage.InitializeAsync()` переключается в UI thread и передаёт управление
+`ExtensionServices`. Менеджер создаёт singleton-сервисы, регистрирует их и вызывает `Initialize()`.
+Каждый сервис объявляет зависимости через `IExtensionService.DependsOn()`.
+
+@section service_dependency_graph Зависимости сервисов
+
+@dot
+digraph ServiceDependencies {
+    graph [rankdir=LR, bgcolor="#1b1f26", fontname="Segoe UI", fontcolor="#f1f5f9"];
+    node [shape=box, style="rounded,filled", fillcolor="#273142", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", fontsize=9, penwidth=1.2];
+    edge [fontname="Segoe UI", fontsize=8, color="#8aa4c2", fontcolor="#d9e2ec", penwidth=1.15];
+
+    manager [label="ExtensionServices", fillcolor="#253b56", URL="\ref TabsManagerExtension.Services.ExtensionServices"];
+    ide [label="VsIDEStateFlagsTrackerService", URL="\ref TabsManagerExtension.VsShell.Services.VsIDEStateFlagsTrackerService"];
+    solution_events [label="VsSolutionEventsTrackerService", URL="\ref TabsManagerExtension.VsShell.Solution.Services.VsSolutionEventsTrackerService"];
+    solution_model [label="SolutionHierarchyAnalyzerService", URL="\ref TabsManagerExtension.VsShell.Solution.Services.SolutionHierarchyAnalyzerService"];
+    includes [label="IncludeDependencyAnalyzerService", URL="\ref TabsManagerExtension.VsShell.Solution.Services.IncludeDependencyAnalyzerService"];
+    docs [label="VsDocumentActivationTrackerService", URL="\ref TabsManagerExtension.VsShell.Document.Services.VsDocumentActivationTrackerService"];
+    frames [label="VsWindowFrameActivationTrackerService", URL="\ref TabsManagerExtension.VsShell.Solution.Services.VsWindowFrameActivationTrackerService"];
+    input [label="TextEditorInputCommandFilterService", URL="\ref TabsManagerExtension.VsShell.TextEditor.Services.TextEditorInputCommandFilterService"];
+    navigation [label="TextEditorFileNavigationCommandFilterService", URL="\ref TabsManagerExtension.VsShell.TextEditor.Services.TextEditorFileNavigationCommandFilterService"];
+
+    manager -> ide [style=dashed, label="register"];
+    manager -> solution_events [style=dashed];
+    manager -> solution_model [style=dashed];
+    manager -> includes [style=dashed];
+    manager -> docs [style=dashed];
+    manager -> frames [style=dashed];
+    manager -> input [style=dashed];
+    manager -> navigation [style=dashed];
+
+    solution_model -> ide [label="depends on"];
+    solution_model -> solution_events [label="depends on"];
+    includes -> ide [label="depends on"];
+    includes -> solution_events [label="depends on"];
+    includes -> solution_model [label="depends on"];
+    input -> docs [label="depends on"];
+    input -> frames [label="depends on"];
+    navigation -> docs [label="depends on"];
+    navigation -> frames [label="depends on"];
+}
+@enddot
+
+@section shutdown_order Завершение работы
+
+При shutdown менеджер выполняет topological sort по `DependsOn()` и выключает сервисы в
+обратном порядке. Если UI ещё использует сервисы, `RequestShutdown()` откладывает остановку до
+того момента, когда счётчик `BeginUsage()/EndUsage()` станет равен нулю.
+*/

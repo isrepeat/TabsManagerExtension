@@ -1,0 +1,107 @@
+# Doxygen configuration for Tabs Manager Extension.
+# Run from the repository root: powershell -File docs/GenerateDocumentation.ps1
+
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "Tabs Manager Extension"
+PROJECT_BRIEF          = "Visual Studio extension architecture and source reference"
+OUTPUT_DIRECTORY       = Doxygen_Documentation_HTML
+OUTPUT_LANGUAGE        = Russian
+ALLOW_UNICODE_NAMES    = YES
+
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = .
+SHORT_NAMES            = NO
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MULTILINE_CPP_IS_BRIEF = NO
+INHERIT_DOCS           = YES
+TAB_SIZE               = 4
+
+# Existing project: expose the structure immediately, even where XML comments
+# have not yet been added. New comments will enrich the same generated pages.
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_PRIV_VIRTUAL   = YES
+EXTRACT_PACKAGE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_UNDOC_RELATIONS   = NO
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+INPUT                  = docs \
+                         TabsManagerExtension \
+                         UtilityHelpersLib/HelpersCs
+FILE_PATTERNS          = *.cs *.dox
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */bin/* \
+                         */obj/* \
+                         */Generated\ Files/* \
+                         */packages/*
+EXCLUDE_SYMLINKS       = YES
+EXTENSION_MAPPING      = cs=Csharp
+
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+VERBATIM_HEADERS       = YES
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_EXTRA_STYLESHEET  = docs/doxygen-custom.css
+GENERATE_TREEVIEW      = YES
+FULL_SIDEBAR           = YES
+PAGE_OUTLINE_PANEL     = NO
+DISABLE_INDEX          = NO
+HTML_DYNAMIC_MENUS     = YES
+HTML_DYNAMIC_SECTIONS  = YES
+HTML_CODE_FOLDING      = YES
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
+
+GENERATE_LATEX         = NO
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+GENERATE_DOCBOOK       = NO
+
+# Graphviz diagrams. SVG keeps the large architecture map readable and preserves
+# clickable references. Non-interactive embedding also avoids a white viewport
+# around dark diagrams.
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = NO
+DOT_NUM_THREADS        = 0
+NUM_PROC_THREADS       = 0
+DOT_GRAPH_MAX_NODES    = 150
+MAX_DOT_GRAPH_DEPTH    = 0
+DOT_CLEANUP            = YES
+DOT_COMMON_ATTR        = "bgcolor=\"#1b1f26\",fontname=\"Segoe UI\",fontsize=10,fontcolor=\"#f1f5f9\""
+DOT_NODE_ATTR          = "shape=box,height=0.2,width=0.4,style=filled,fillcolor=\"#273142\",color=\"#718096\",fontcolor=\"#f1f5f9\""
+DOT_EDGE_ATTR          = "labelfontname=\"Segoe UI\",labelfontsize=9,color=\"#8aa4c2\",fontcolor=\"#d9e2ec\",labelfontcolor=\"#d9e2ec\",arrowhead=vee,arrowsize=0.7"
+
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+UML_LOOK               = YES
+DOT_UML_DETAILS        = YES
+UML_LIMIT_NUM_FIELDS   = 24
+TEMPLATE_RELATIONS     = YES
+GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
+DIR_GRAPH_MAX_DEPTH    = 6
+
+# Global caller/callee graphs make a full C# run disproportionately slow and are
+# heuristic because Doxygen does not run Roslyn. Enable them locally with
+# @callgraph / @callergraph on selected methods when a concrete flow needs it.
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_FORMAT            = "$file:$line: $text"
+WARN_LOGFILE           = Doxygen_Documentation_HTML/doxygen-warnings.log
