@@ -94,7 +94,40 @@ namespace TabsManagerExtension.VsShell.Document {
             base.OnCommonStatePropertyChanged(sender, e);
         }
 
-        protected void OpenWithProjectContext(bool restoreActiveDocument = true) {
+        public IReadOnlyList<string> GetProjectContextSwitchSourcePaths() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (base.ProjectBaseViewModel is not Project.LoadedProject ownProject) {
+                return Array.Empty<string>();
+            }
+
+            var includeDependencyAnalyzer = VsShell.Solution.Services.IncludeDependencyAnalyzerService.Instance;
+            if (!includeDependencyAnalyzer.IsReady()) {
+                Helpers.Diagnostic.Logger.LogWarning("[Document.GetProjectContextSwitchSourcePaths] Include dependency graph is not ready.");
+                return Array.Empty<string>();
+            }
+
+            var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
+            return includeDependencyAnalyzer
+                .GetTransitiveFilesIncludersByIncludePath(base.HierarchyItemEntry.BaseViewModel.FilePath)
+                .Where(sourceFile =>
+                    sourceFile.LoadedProject.Equals(ownProject) &&
+                    string.Equals(System.IO.Path.GetExtension(sourceFile.FilePath), ".cpp", StringComparison.OrdinalIgnoreCase))
+                // Запись в графе сама по себе недостаточна: файл должен существовать в hierarchy
+                // именно целевого проекта. Например, одинаковый Engine.cpp из другого project context
+                // нельзя использовать для переключения выбранного shared-header в Engine.
+                .Where(sourceFile => solutionHierarchyAnalyzer.SourcesRepresentationsTable
+                    .GetDocumentByProjectAndDocumentPath(base.ProjectBaseViewModel, sourceFile.FilePath) != null)
+                .Select(sourceFile => sourceFile.FilePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        protected void OpenWithProjectContext(
+            bool restoreActiveDocument = true,
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             Helpers.ThrowableAssert.Require(!base.CommonState.IsDisposed);
@@ -104,7 +137,7 @@ namespace TabsManagerExtension.VsShell.Document {
             var ownProject = base.ProjectBaseViewModel as Project.LoadedProject;
 
             // Сохраняем активный документ до всех действий.
-            var activeDocumentBefore = PackageServices.Dte2.ActiveDocument;
+            var activeDocumentPathBefore = PackageServices.Dte2.ActiveDocument?.FullName;
 
             // Попытка найти первый cpp/h файл проекта,
             // чтобы открыть его и "переключить" контекст редактора на нужный проект.
@@ -148,6 +181,14 @@ namespace TabsManagerExtension.VsShell.Document {
                 .ToList();
 
             var contextSwitchCandidate = contextSwitchCandidates
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.SourceFile.FilePath,
+                    preferredContextSwitchSourcePath,
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                ?? contextSwitchCandidates.FirstOrDefault(candidate =>
+                    activatedContextSwitchSources?.Contains(candidate.SourceFile.FilePath) == true)
+                ?? contextSwitchCandidates
                 .FirstOrDefault(candidate => !openDocumentPaths.Contains(candidate.SourceFile.FilePath))
                 ?? contextSwitchCandidates.FirstOrDefault();
 
@@ -182,16 +223,25 @@ namespace TabsManagerExtension.VsShell.Document {
                 base.HierarchyItemEntry.BaseViewModel.ItemId);
             ErrorHandler.ThrowOnFailure(hr);
 
-            // Переключаемся на файл который включает наш файл (для смены activeDocumentFrame)
-            // иначе IntelliSense не подхватит контекст.
-            hr = Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
-                contextSwitchDocumentProject.ProjectHierarchy.VsRealHierarchy,
-                contextSwitchDocumentHierarchyItem.ItemId);
-            ErrorHandler.ThrowOnFailure(hr);
-            
+            bool sourceWasActivatedInThisBatch =
+                activatedContextSwitchSources?.Contains(contextSwitchDocumentHierarchyItem.FilePath) == true;
 
-            // Закрываем временный файл переключения контекста.
-            if (needCloseContextSwitchDocumentNode) {
+            if (!sourceWasActivatedInThisBatch) {
+                // Один .cpp может транзитивно включать несколько выбранных хедеров. В групповой
+                // операции активируем его только для первого хедера, а остальные используют уже
+                // обновлённый translation-unit context без лишнего мерцания editor frame.
+                hr = Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
+                    contextSwitchDocumentProject.ProjectHierarchy.VsRealHierarchy,
+                    contextSwitchDocumentHierarchyItem.ItemId);
+                ErrorHandler.ThrowOnFailure(hr);
+                activatedContextSwitchSources?.Add(contextSwitchDocumentHierarchyItem.FilePath);
+            }
+            else {
+                Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Reusing already activated context switch source '{contextSwitchDocumentHierarchyItem.FilePath}'.");
+            }
+
+            // Закрываем только тот временный файл, который действительно открыли на этом шаге.
+            if (!sourceWasActivatedInThisBatch && needCloseContextSwitchDocumentNode) {
                 var doc = PackageServices.Dte2.Documents.Cast<EnvDTE.Document>()
                     .FirstOrDefault(d =>
                         string.Equals(
@@ -209,7 +259,23 @@ namespace TabsManagerExtension.VsShell.Document {
                 // Возвращаем активным предыдущий документ.
                 VsixThreadHelper.RunOnUiThread(async () => {
                     await Task.Delay(20);
-                    activeDocumentBefore?.Activate();
+                    // Shared-header при смене context закрывается и открывается заново. Поэтому
+                    // сохранённый EnvDTE.Document уже может быть недействительным COM-объектом;
+                    // например, Activate() на старом SharedUtils.h возвращает E_UNEXPECTED.
+                    var currentDocument = PackageServices.Dte2.Documents
+                        .Cast<EnvDTE.Document>()
+                        .FirstOrDefault(document => string.Equals(
+                            document.FullName,
+                            activeDocumentPathBefore,
+                            StringComparison.OrdinalIgnoreCase
+                        ));
+
+                    if (currentDocument != null) {
+                        currentDocument.Activate();
+                    }
+                    else if (!string.IsNullOrEmpty(activeDocumentPathBefore)) {
+                        Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Cannot restore active document '{activeDocumentPathBefore}' because its current frame was not found.");
+                    }
                 });
             }
         }
@@ -224,7 +290,10 @@ namespace TabsManagerExtension.VsShell.Document {
         public SharedItem(_Details.DocumentCommonState commonState) : base(commonState) {
         }
 
-        public new void OpenWithProjectContext() {
+        public new void OpenWithProjectContext(
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             if (base.ProjectBaseViewModel is not Project.LoadedProject targetProject) {
@@ -406,7 +475,11 @@ namespace TabsManagerExtension.VsShell.Document {
                     return;
                 }
 
-                base.OpenWithProjectContext(restoreActiveDocument: true);
+                base.OpenWithProjectContext(
+                    restoreActiveDocument: true,
+                    preferredContextSwitchSourcePath: preferredContextSwitchSourcePath,
+                    activatedContextSwitchSources: activatedContextSwitchSources
+                );
 
                 VsixThreadHelper.RunOnUiThread(async () => {
                     await Task.Delay(300);
@@ -467,8 +540,14 @@ namespace TabsManagerExtension.VsShell.Document {
         public ExternalInclude(_Details.DocumentCommonState commonState) : base(commonState) {
         }
 
-        public new void OpenWithProjectContext() {
-            base.OpenWithProjectContext();
+        public new void OpenWithProjectContext(
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
+            base.OpenWithProjectContext(
+                preferredContextSwitchSourcePath: preferredContextSwitchSourcePath,
+                activatedContextSwitchSources: activatedContextSwitchSources
+            );
         }
 
         public override string ToString() {

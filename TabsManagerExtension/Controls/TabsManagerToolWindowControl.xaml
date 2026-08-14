@@ -186,6 +186,25 @@
 
 
 
+            <DataTemplate x:Key="DocumentProjectGroupContextCommandTemplate">
+                <MenuItem Header="{Binding Header}"
+                          Command="{Binding Command}"
+                          CommandParameter="{Binding CommandParameterContext}">
+                    <MenuItem.Style>
+                        <Style TargetType="MenuItem" BasedOn="{StaticResource MenuControl/MenuItemCommandStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CommandParameterContext.CanSwitch}" Value="False">
+                                    <Setter Property="Foreground" Value="#70DDDDDD"/>
+                                    <Setter Property="IsEnabled" Value="False"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </MenuItem.Style>
+                </MenuItem>
+            </DataTemplate>
+
+
+
             <DataTemplate x:Key="ReloadDocumentReferencesProjectsCommandTemplate">
                 <DataTemplate.Resources>
                     <Style TargetType="StackPanel">
@@ -217,6 +236,7 @@
             <localTemplateSelectors:VirtualMenuItemTemplateSelector 
                 x:Key="VirtualMenuItemTemplateSelector"
                 DocumentProjectReferenceCommandTemplate="{StaticResource DocumentProjectReferenceCommandTemplate}"
+                DocumentProjectGroupContextCommandTemplate="{StaticResource DocumentProjectGroupContextCommandTemplate}"
                 ReloadDocumentReferencesProjectsCommandTemplate="{StaticResource ReloadDocumentReferencesProjectsCommandTemplate}"
                 />
 

@@ -64,6 +64,12 @@ namespace TabsManagerExtension.State.Document {
         }
 
 
+        public IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> GetAvailableReferences(bool includeSingleProject = false) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return this.BuildReferences(includeSingleProject);
+        }
+
+
         public void Clear() {
             _references.Clear();
         }
@@ -124,7 +130,7 @@ namespace TabsManagerExtension.State.Document {
         }
 
 
-        private IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> BuildReferences() {
+        private IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> BuildReferences(bool includeSingleProject = false) {
             var ext = System.IO.Path.GetExtension(_documenFullName);
             switch (ext) {
                 case ".h":
@@ -151,7 +157,7 @@ namespace TabsManagerExtension.State.Document {
                 .ToList();
 
 
-            if (allSolutionProjects.Count < 2) {
+            if (!includeSingleProject && allSolutionProjects.Count < 2) {
                 return Array.Empty<DocumentProjectReferencesInfo.RefEntry>(); // Игнорируем только лишь ссылки на собсвтенные проекты.
             }
 
@@ -215,6 +221,30 @@ namespace TabsManagerExtension.State.Document {
 
             public void UpdateDocumentEntry(VsShell.Document.DocumentEntryBase newDocumentEntryBase) {
                 this.DocumentEntryBase = newDocumentEntryBase;
+            }
+        }
+
+
+        public sealed class GroupContextEntry {
+            public VsShell.Project.ProjectEntry ProjectEntry { get; }
+            public IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> DocumentReferences { get; }
+            public bool IsAvailableForAll { get; }
+            public bool CanSwitch { get; }
+
+            public GroupContextEntry(
+                VsShell.Project.ProjectEntry projectEntry,
+                IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> documentReferences,
+                bool isAvailableForAll
+                ) {
+                this.ProjectEntry = projectEntry;
+                this.DocumentReferences = documentReferences;
+                this.IsAvailableForAll = isAvailableForAll;
+                this.CanSwitch =
+                    isAvailableForAll &&
+                    projectEntry.IsLoaded &&
+                    documentReferences.All(reference =>
+                        !reference.DocumentEntryBase.IsInvalidated &&
+                        !reference.DocumentEntryBase.BaseViewModel.IsDisposed);
             }
         }
     }

@@ -891,6 +891,111 @@ namespace TabsManagerExtension.Controls {
             if (parameter is DocumentProjectReferencesInfo.RefEntry refEntry) {
                 this.MoveDocumentToProjectGroup(refEntry.DocumentEntryBase);
             }
+            else if (parameter is DocumentProjectReferencesInfo.GroupContextEntry groupContextEntry && groupContextEntry.CanSwitch) {
+                // Меню может закрыться и пересобрать набор выделения уже после первого переноса,
+                // поэтому обходим снимок ссылок, собранный при открытии меню.
+                var activeDocumentPathBefore = PackageServices.Dte2.ActiveDocument?.FullName;
+                var contextSwitchPlan = this.BuildGroupContextSwitchPlan(groupContextEntry.DocumentReferences);
+                var activatedContextSwitchSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var documentReference in groupContextEntry.DocumentReferences.ToList()) {
+                    contextSwitchPlan.TryGetValue(documentReference, out var contextSwitchSourcePath);
+                    this.MoveDocumentToProjectGroup(
+                        documentReference.DocumentEntryBase,
+                        playFeedback: false,
+                        preferredContextSwitchSourcePath: contextSwitchSourcePath,
+                        activatedContextSwitchSources: activatedContextSwitchSources
+                    );
+                }
+
+                Console.Beep(frequency: 1000, duration: 300);
+
+                // Каждый shared-header может запланировать своё переоткрытие. После завершения
+                // всей пачки возвращаем фокус в документ, активный до выбора контекста.
+                VsixThreadHelper.RunOnUiThread(async () => {
+                    await Task.Delay(450);
+                    var currentDocument = PackageServices.Dte2.Documents
+                        .Cast<EnvDTE.Document>()
+                        .FirstOrDefault(document => string.Equals(
+                            document.FullName,
+                            activeDocumentPathBefore,
+                            StringComparison.OrdinalIgnoreCase
+                        ));
+
+                    if (currentDocument != null) {
+                        currentDocument.Activate();
+                    }
+                    else if (!string.IsNullOrEmpty(activeDocumentPathBefore)) {
+                        Helpers.Diagnostic.Logger.LogDebug($"[OnMoveTabItemToRelatedProject] Cannot restore active document '{activeDocumentPathBefore}' because its current frame was not found.");
+                    }
+                });
+            }
+        }
+
+        private IReadOnlyDictionary<DocumentProjectReferencesInfo.RefEntry, string> BuildGroupContextSwitchPlan(
+            IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> documentReferences
+            ) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            VsShell.Document.Document? GetCurrentDocument(VsShell.Document.DocumentEntryBase entry) {
+                return entry switch {
+                    VsShell.Document.ExternalIncludeEntry externalIncludeEntry =>
+                        externalIncludeEntry.MultiState.Current as VsShell.Document.Document,
+                    VsShell.Document.SharedItemEntry sharedItemEntry =>
+                        sharedItemEntry.MultiState.Current as VsShell.Document.Document,
+                    _ => null
+                };
+            }
+
+            var candidatesByDocument = documentReferences.ToDictionary(
+                reference => reference,
+                reference => GetCurrentDocument(reference.DocumentEntryBase) is VsShell.Document.Document document
+                    ? document.GetProjectContextSwitchSourcePaths().ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            );
+
+            var openDocumentPaths = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .Select(document => document.FullName)
+                .Where(path => !string.IsNullOrEmpty(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var uncoveredDocuments = candidatesByDocument
+                .Where(pair => pair.Value.Count > 0)
+                .Select(pair => pair.Key)
+                .ToHashSet();
+            var result = new Dictionary<DocumentProjectReferencesInfo.RefEntry, string>();
+
+            // Жадное покрытие: на каждом шаге берём .cpp, который включает максимум ещё не
+            // обработанных хедеров. Например, если Engine.cpp включает A.h, B.h и C.h, а
+            // Tools.cpp только C.h, для всех трёх будет выбран один Engine.cpp.
+            while (uncoveredDocuments.Count > 0) {
+                var selectedSourcePath = uncoveredDocuments
+                    .SelectMany(reference => candidatesByDocument[reference])
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(path => new {
+                        Path = path,
+                        CoveredCount = uncoveredDocuments.Count(reference => candidatesByDocument[reference].Contains(path)),
+                        IsOpen = openDocumentPaths.Contains(path)
+                    })
+                    .OrderByDescending(candidate => candidate.CoveredCount)
+                    .ThenBy(candidate => candidate.IsOpen)
+                    .ThenBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+                    .First()
+                    .Path;
+
+                var coveredDocuments = uncoveredDocuments
+                    .Where(reference => candidatesByDocument[reference].Contains(selectedSourcePath))
+                    .ToList();
+                foreach (var coveredDocument in coveredDocuments) {
+                    result[coveredDocument] = selectedSourcePath;
+                    uncoveredDocuments.Remove(coveredDocument);
+                }
+            }
+
+            foreach (var referenceWithoutSource in candidatesByDocument.Where(pair => pair.Value.Count == 0)) {
+                Helpers.Diagnostic.Logger.LogWarning($"[BuildGroupContextSwitchPlan] No transitive .cpp was found for '{referenceWithoutSource.Key.DocumentEntryBase.BaseViewModel.HierarchyItemEntry.BaseViewModel.FilePath}'. Project context will be changed without translation-unit activation.");
+            }
+
+            return result;
         }
 
 
@@ -1012,6 +1117,7 @@ namespace TabsManagerExtension.Controls {
 
         private void OnTabItemVirtualMenuOpen(object parameter) {
             //using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnTabItemVirtualMenuOpen()");
+            ThreadHelper.ThrowIfNotOnUIThread();
 
             if (parameter is Controls.MenuControl.MenuOpeningArgs virtualMenuOpeningArgs) {
                 if (virtualMenuOpeningArgs.DataContext is TabItemBase tabItem) {
@@ -1035,24 +1141,56 @@ namespace TabsManagerExtension.Controls {
                             },
                         };
                         if (tabItemDocument.ShellDocument != null) {
-                            tabItemDocument.DocumentProjectReferencesInfo.UpdateReferences();
+                            if (this.TryGetSelectedHeaderGroup(tabItemDocument, out var selectedHeaders)) {
+                                var groupContexts = this.BuildGroupContextEntries(selectedHeaders);
 
-                            if (tabItemDocument.DocumentProjectReferencesInfo.References.Count > 0) {
-                                this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
+                                if (groupContexts.Count > 0) {
+                                    this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
 
-                                foreach (var refEntry in tabItemDocument.DocumentProjectReferencesInfo.References) {
+                                    var commonContexts = groupContexts.Where(context => context.IsAvailableForAll).ToList();
+                                    var differingContexts = groupContexts.Where(context => !context.IsAvailableForAll).ToList();
+
+                                    foreach (var groupContext in commonContexts) {
+                                        this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                            Header = groupContext.ProjectEntry.BaseViewModel.Name,
+                                            Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
+                                            CommandParameterContext = groupContext,
+                                        });
+                                    }
+
+                                    if (commonContexts.Count > 0 && differingContexts.Count > 0) {
+                                        this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
+                                    }
+
+                                    foreach (var groupContext in differingContexts) {
+                                        this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                            Header = groupContext.ProjectEntry.BaseViewModel.Name,
+                                            Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
+                                            CommandParameterContext = groupContext,
+                                        });
+                                    }
+                                }
+                            }
+                            else {
+                                tabItemDocument.DocumentProjectReferencesInfo.UpdateReferences();
+
+                                if (tabItemDocument.DocumentProjectReferencesInfo.References.Count > 0) {
+                                    this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
+
+                                    foreach (var refEntry in tabItemDocument.DocumentProjectReferencesInfo.References) {
+                                        this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                            Header = refEntry.ProjectEntry.BaseViewModel.Name,
+                                            Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
+                                            CommandParameterContext = refEntry,
+                                        });
+                                    }
+
                                     this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
-                                        Header = refEntry.ProjectEntry.BaseViewModel.Name,
-                                        Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
-                                        CommandParameterContext = refEntry,
+                                        Header = "Reload projects",
+                                        Command = new Helpers.RelayCommand<object>(this.OnReloadDocumentReferencesProjects),
+                                        CommandParameterContext = tabItemDocument.DocumentProjectReferencesInfo,
                                     });
                                 }
-
-                                this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
-                                    Header = "Reload projects",
-                                    Command = new Helpers.RelayCommand<object>(this.OnReloadDocumentReferencesProjects),
-                                    CommandParameterContext = tabItemDocument.DocumentProjectReferencesInfo,
-                                });
                             }
                         }
                     }
@@ -1062,6 +1200,75 @@ namespace TabsManagerExtension.Controls {
                 }
             }
         }
+
+        private bool TryGetSelectedHeaderGroup(TabItemDocument anchorTabItem, out IReadOnlyList<TabItemDocument> selectedHeaders) {
+            var selectedItems = _tabItemsSelectionCoordinator.SelectedItems
+                .Select(entry => entry.Item)
+                .ToList();
+
+            bool anchorIsSelected = selectedItems.Any(item => ReferenceEquals(item, anchorTabItem));
+            bool allSelectedItemsAreHeaders = selectedItems.All(item =>
+                item is TabItemDocument document && IsHeaderPath(document.FullName));
+
+            if (_tabItemsSelectionCoordinator.SelectionState != Helpers.Enums.SelectionState.Multiple ||
+                !anchorIsSelected ||
+                selectedItems.Count < 2 ||
+                !allSelectedItemsAreHeaders) {
+                selectedHeaders = Array.Empty<TabItemDocument>();
+                return false;
+            }
+
+            selectedHeaders = selectedItems.Cast<TabItemDocument>().ToList();
+            return true;
+        }
+
+        private IReadOnlyList<DocumentProjectReferencesInfo.GroupContextEntry> BuildGroupContextEntries(
+            IReadOnlyList<TabItemDocument> selectedHeaders
+            ) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var referencesByDocument = selectedHeaders
+                .Select(header => header.DocumentProjectReferencesInfo
+                    .GetAvailableReferences(includeSingleProject: true)
+                    .GroupBy(reference => reference.ProjectEntry.BaseViewModel.ProjectGuid)
+                    .ToDictionary(group => group.Key, group => group.First()))
+                .ToList();
+
+            var allProjectGuids = referencesByDocument
+                .SelectMany(references => references.Keys)
+                .Distinct()
+                .ToList();
+
+            var result = new List<DocumentProjectReferencesInfo.GroupContextEntry>();
+            foreach (var projectGuid in allProjectGuids) {
+                var documentReferences = new List<DocumentProjectReferencesInfo.RefEntry>();
+                foreach (var references in referencesByDocument) {
+                    if (references.TryGetValue(projectGuid, out var documentReference)) {
+                        documentReferences.Add(documentReference);
+                    }
+                }
+
+                bool isAvailableForAll = documentReferences.Count == selectedHeaders.Count;
+                result.Add(new DocumentProjectReferencesInfo.GroupContextEntry(
+                    documentReferences[0].ProjectEntry,
+                    documentReferences,
+                    isAvailableForAll
+                ));
+            }
+
+            return result
+                .OrderByDescending(context => context.IsAvailableForAll)
+                .ThenBy(context => context.ProjectEntry.BaseViewModel.UniqueName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static bool IsHeaderPath(string path) {
+            string extension = Path.GetExtension(path);
+            return
+                string.Equals(extension, ".h", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, ".hpp", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void OnTabItemVirtualMenuClosed(object parameter) {
             if (parameter is Controls.MenuControl.MenuClosedArgs virtualMenuClosedArgs) {
                 if (virtualMenuClosedArgs.DataContext is TabItemBase tabItem) {
@@ -1273,11 +1480,21 @@ namespace TabsManagerExtension.Controls {
         }
 
 
-        private void MoveDocumentToProjectGroup(VsShell.Document.DocumentEntryBase documentEntryBase) {
+        private void MoveDocumentToProjectGroup(
+            VsShell.Document.DocumentEntryBase documentEntryBase,
+            bool playFeedback = true,
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("MoveDocumentToProjectGroup()");
             ThreadHelper.ThrowIfNotOnUIThread();
             
-            this.OpenTabItemWithProjectContext(documentEntryBase);
+            this.OpenTabItemWithProjectContext(
+                documentEntryBase,
+                playFeedback,
+                preferredContextSwitchSourcePath,
+                activatedContextSwitchSources
+            );
 
             var docVM = documentEntryBase.BaseViewModel;
             var hierarchyVM = documentEntryBase.BaseViewModel.HierarchyItemEntry.BaseViewModel;
@@ -1290,11 +1507,21 @@ namespace TabsManagerExtension.Controls {
         }
 
 
-        private void OpenTabItemWithProjectContext(VsShell.Document.DocumentEntryBase documentEntryBase) {
+        private void OpenTabItemWithProjectContext(
+            VsShell.Document.DocumentEntryBase documentEntryBase,
+            bool playFeedback,
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
             if (documentEntryBase is VsShell.Document.ExternalIncludeEntry externalIncludeEntry) {
                 if (externalIncludeEntry.MultiState.Current is VsShell.Document.ExternalInclude externalInclude) {
-                    externalInclude.OpenWithProjectContext();
-                    Console.Beep(frequency: 1000, duration: 300);
+                    externalInclude.OpenWithProjectContext(
+                        preferredContextSwitchSourcePath,
+                        activatedContextSwitchSources
+                    );
+                    if (playFeedback) {
+                        Console.Beep(frequency: 1000, duration: 300);
+                    }
                 }
                 else if (externalIncludeEntry.MultiState.Current is VsShell.Document.InvalidatedDocument invalidatedDocument) {
                     System.Diagnostics.Debugger.Break();
@@ -1303,8 +1530,13 @@ namespace TabsManagerExtension.Controls {
             }
             else if (documentEntryBase is VsShell.Document.SharedItemEntry sharedItemEntry) {
                 if (sharedItemEntry.MultiState.Current is VsShell.Document.SharedItem sharedItem) {
-                    sharedItem.OpenWithProjectContext();
-                    Console.Beep(frequency: 1000, duration: 300);
+                    sharedItem.OpenWithProjectContext(
+                        preferredContextSwitchSourcePath,
+                        activatedContextSwitchSources
+                    );
+                    if (playFeedback) {
+                        Console.Beep(frequency: 1000, duration: 300);
+                    }
                 }
                 else if (sharedItemEntry.MultiState.Current is VsShell.Document.InvalidatedDocument invalidatedDocument) {
                     invalidatedDocument.OpenWithProjectContext();
