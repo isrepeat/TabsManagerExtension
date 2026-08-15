@@ -9,3 +9,8 @@ insert_final_newline = true
 # Visual Studio традиционно сохраняет исходный код .NET/C++ с сигнатурой UTF-8 (BOM).
 [*.{cs,cpp,h,hpp,hlsl}]
 charset = utf-8-bom
+
+# Открывающая скобка управляющих конструкций остаётся на строке с условием.
+# Для типов, методов и остальных C#-конструкций сохраняется перенос на новую строку.
+[*.cs]
+csharp_new_line_before_open_brace = accessors, anonymous_methods, anonymous_types, events, indexers, lambdas, local_functions, methods, object_collection_array_initializers, properties, types
