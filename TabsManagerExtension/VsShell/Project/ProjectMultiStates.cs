@@ -144,30 +144,37 @@ namespace TabsManagerExtension.VsShell.Project {
             where TDocumentEntry : VsShell.Document.DocumentEntryBase {
 
             ThreadHelper.ThrowIfNotOnUIThread();
-
-            //if (this.UniqueName == "Editor\\Editor.vcxproj") {
-            if (this.UniqueName == "Engine\\Engine.vcxproj") {
-                int xx = 9;
-            }
+            int replacedCount = 0;
+            int addedCount = 0;
+            int removedCount = 0;
 
             foreach (var hierarchyItemEntry in e.Added) {
                 var existDocumentEntry = this.FindDocumentByHierarchyItem(hierarchyItemEntry, currentDocuments);
                 if (existDocumentEntry != null) {
-                    Helpers.Diagnostic.Logger.LogDebug($"[UpdateProjectHierarchyItems] Remove exist: {existDocumentEntry} [{base.UniqueName}]");
                     currentDocuments.RemoveAndDispose(existDocumentEntry);
+                    replacedCount++;
                 }
 
                 var newDocumentEntry = createNewDocumenEntryFactory(hierarchyItemEntry);
 
-                Helpers.Diagnostic.Logger.LogDebug($"[UpdateProjectHierarchyItems] Add: {newDocumentEntry} [{base.UniqueName}]");
                 currentDocuments.Add(newDocumentEntry);
+                addedCount++;
             }
 
             foreach (var hierarchyItemEntry in e.Removed) {
                 var existDocumentEntry = this.FindDocumentByHierarchyItem(hierarchyItemEntry, currentDocuments);
 
-                Helpers.Diagnostic.Logger.LogDebug($"[UpdateProjectHierarchyItems] Remove: {existDocumentEntry} [{base.UniqueName}]");
-                currentDocuments.RemoveAndDispose(existDocumentEntry);
+                if (existDocumentEntry != null) {
+                    currentDocuments.RemoveAndDispose(existDocumentEntry);
+                    removedCount++;
+                }
+            }
+
+            if (addedCount > 0 || removedCount > 0 || replacedCount > 0) {
+                Helpers.Diagnostic.Logger.LogDebug(
+                    $"[UpdateProjectHierarchyItems] Project='{base.UniqueName}', added={addedCount}, " +
+                    $"removed={removedCount}, replaced={replacedCount}."
+                );
             }
         }
 

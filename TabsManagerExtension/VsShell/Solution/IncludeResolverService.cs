@@ -49,7 +49,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
                 // Для обоих delimited-вариантов продолжаем поиск в evaluated include directories
                 // активной Configuration|Platform проекта.
-                var projectIncludeDirs = msBuildSolutionWatcher.GetIncludeDirectoriesFor(ownerProject.FullName);
+                var projectIncludeDirs = msBuildSolutionWatcher.GetCachedIncludeDirectoriesFor(ownerProject.FullName);
                 foreach (var dir in projectIncludeDirs) {
                     string resolved = Path.GetFullPath(Path.Combine(dir, includePath));
                     if (File.Exists(resolved)) {

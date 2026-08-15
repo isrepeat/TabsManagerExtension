@@ -6,6 +6,8 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Diagnostics;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.OLE.Interop;
 using Microsoft.VisualStudio.Shell;
@@ -32,6 +34,9 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private bool _buildingProjectGraphInProcess = false;
         private int _msBuildRefreshQueued = 0;
         private volatile bool _isShuttingDown = false;
+        private CancellationTokenSource? _graphBuildCancellation;
+        private readonly object _includeParseCacheLock = new();
+        private readonly Dictionary<string, IncludeParseCacheEntry> _includeParseCache = new(StringComparer.OrdinalIgnoreCase);
 
         private static readonly HashSet<string> _supportedCppExtensions = new(StringComparer.OrdinalIgnoreCase) {
             ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp",
@@ -279,11 +284,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             }
             _lastLoadedSolutionName = solutionName;
 
-            VsixThreadHelper.RunOnVsThread(() => {
-                //await Task.Run(() => {
-                    this.BuildSolutionGraph();
-                //});
-            });
+            VsixThreadHelper.RunOnVsThread(this.BuildSolutionGraphAsync);
         }
 
 
@@ -444,31 +445,52 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         /// <summary>
         /// Depends on SolutionHierarchyAnalyzerService.
         /// </summary>
-        private void BuildSolutionGraph() {
+        private async Task BuildSolutionGraphAsync() {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("BuildSolutionGraph()");
-            ThreadHelper.ThrowIfNotOnUIThread();
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
             this.ClearAnalysisState();
             _buildingSolutionGraphInProcess = true;
+            var cancellation = new CancellationTokenSource();
+            _graphBuildCancellation = cancellation;
+            CancellationToken cancellationToken = cancellation.Token;
+            MsBuildSolutionWatcher? unpublishedWatcher = null;
 
             try {
-                //Console.Beep(3000, 500);
                 var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
-                var loadedProjectNodes = solutionHierarchyAnalyzer.LoadedProjects;
-                //.Where(pn => EnvDteUtils.IsCppProject(pn.dteProject))
-                //.ToList();
+                var loadedProjectNodes = solutionHierarchyAnalyzer.LoadedProjects
+                    .Where(this.IsCppProjectNode)
+                    .ToList();
 
                 var dteProjects = loadedProjectNodes
                     .Select(pn => pn.ShellProject.dteProject)
                     .ToList();
 
-                _msBuildSolutionWatcher = new MsBuildSolutionWatcher(dteProjects);
-                _msBuildSolutionWatcher.IncludeEnvironmentChanged += this.OnMsBuildIncludeEnvironmentChanged;
-                _solutionSourceFileGraph = new SolutionSourceFileGraph(_msBuildSolutionWatcher);
+                var projectEvaluationInputs = MsBuildSolutionWatcher.CaptureProjectEvaluationInputs(dteProjects);
 
-                foreach (var loadedProjectNode in loadedProjectNodes) {
-                    this.UpdateProjectGraph(loadedProjectNode);
-                }
+                var snapshotWatch = Stopwatch.StartNew();
+                var projectSnapshots = await this.CreateProjectSnapshotsAsync(loadedProjectNodes, cancellationToken);
+                snapshotWatch.Stop();
+
+                var graphWatch = Stopwatch.StartNew();
+                var buildResult = await Task.Run(
+                    () => {
+                        var watcher = new MsBuildSolutionWatcher(projectEvaluationInputs);
+                        unpublishedWatcher = watcher;
+                        var newGraph = this.BuildGraphFromSnapshots(projectSnapshots, watcher, cancellationToken);
+                        return (Watcher: watcher, Graph: newGraph);
+                    },
+                    cancellationToken
+                );
+
+                graphWatch.Stop();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                buildResult.Watcher.AttachDteProjects(projectEvaluationInputs);
+                buildResult.Watcher.IncludeEnvironmentChanged += this.OnMsBuildIncludeEnvironmentChanged;
+                _msBuildSolutionWatcher = buildResult.Watcher;
+                _solutionSourceFileGraph = buildResult.Graph;
+                unpublishedWatcher = null;
 
                 string? solutionDir = Path.GetDirectoryName(PackageServices.Dte2.Solution.FullName);
                 if (solutionDir != null && Directory.Exists(solutionDir)) {
@@ -476,18 +498,101 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     _solutionDirWatcher.DirectoryChanged += this.OnSolutionDirectoryChanged;
                 }
 
-#if DEBUG
-                Console.Beep(1500, 500);
-#endif
+                int sourceFileCount = projectSnapshots.Sum(snapshot => snapshot.FilePaths.Count);
+                Helpers.Diagnostic.Logger.LogDebug(
+                    $"[IncludeDependencyAnalyzerService] Graph ready: projects={projectSnapshots.Count}, " +
+                    $"source representations={sourceFileCount}, snapshot={snapshotWatch.ElapsedMilliseconds} ms, " +
+                    $"background build={graphWatch.ElapsedMilliseconds} ms."
+                );
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                unpublishedWatcher?.Dispose();
+                Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Background graph build canceled.");
             }
             catch (Exception ex) {
+                unpublishedWatcher?.Dispose();
                 Helpers.Diagnostic.Logger.LogError($"[BuildSolutionGraph] exception: {ex}");
                 this.ClearAnalysisState();
                 _lastLoadedSolutionName = null;
             }
             finally {
-                _buildingSolutionGraphInProcess = false;
+                if (ReferenceEquals(_graphBuildCancellation, cancellation)) {
+                    _graphBuildCancellation.Dispose();
+                    _graphBuildCancellation = null;
+                    _buildingSolutionGraphInProcess = false;
+                }
             }
+        }
+
+        private async Task<List<ProjectFilesSnapshot>> CreateProjectSnapshotsAsync(
+            IReadOnlyList<VsShell.Project.LoadedProject> loadedProjects,
+            CancellationToken cancellationToken) {
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            var result = new List<ProjectFilesSnapshot>(loadedProjects.Count);
+
+            foreach (var loadedProject in loadedProjects) {
+                cancellationToken.ThrowIfCancellationRequested();
+                var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var stack = new Stack<EnvDTE.ProjectItem>();
+
+                foreach (EnvDTE.ProjectItem item in loadedProject.ShellProject.dteProject.ProjectItems) {
+                    stack.Push(item);
+                }
+
+                int processedItems = 0;
+                while (stack.Count > 0) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var current = stack.Pop();
+
+                    try {
+                        if (current.FileCount > 0) {
+                            string filePath = current.FileNames[1];
+                            if (this.IsCppSourcePath(filePath) && File.Exists(filePath)) {
+                                filePaths.Add(filePath);
+                            }
+                        }
+
+                        if (current.ProjectItems != null) {
+                            foreach (EnvDTE.ProjectItem child in current.ProjectItems) {
+                                stack.Push(child);
+                            }
+                        }
+                    }
+                    catch (Exception ex) {
+                        Helpers.Diagnostic.Logger.LogWarning($"[IncludeDependencyAnalyzerService] Skip unavailable project item: {ex.Message}");
+                    }
+
+                    processedItems++;
+                    if (processedItems % 200 == 0) {
+                        await Task.Yield();
+                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+                    }
+                }
+
+                result.Add(new ProjectFilesSnapshot(loadedProject, filePaths.ToList()));
+                await Task.Yield();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            }
+
+            return result;
+        }
+
+        private SolutionSourceFileGraph BuildGraphFromSnapshots(
+            IReadOnlyList<ProjectFilesSnapshot> projectSnapshots,
+            MsBuildSolutionWatcher msBuildSolutionWatcher,
+            CancellationToken cancellationToken) {
+
+            var graph = new SolutionSourceFileGraph(msBuildSolutionWatcher);
+            foreach (var projectSnapshot in projectSnapshots) {
+                foreach (string filePath in projectSnapshot.FilePaths) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var sourceFile = new Document.SourceFile(filePath, projectSnapshot.LoadedProject);
+                    graph.AddSourceFileWithIncludes(sourceFile, this.ExtractRawIncludes(filePath));
+                }
+            }
+
+            return graph;
         }
 
 
@@ -495,17 +600,16 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("UpdateProjectGraph()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            Helpers.Diagnostic.Logger.LogParam($"project name = [{loadedProject.UniqueName}]");
-
-            if (_solutionSourceFileGraph == null) {
+            if (_solutionSourceFileGraph == null || !this.IsCppProjectNode(loadedProject)) {
                 return;
             }
-            //Console.Beep(1000, 500);
+
             _buildingProjectGraphInProcess = true;
 
             try {
                 var discoveredProjectFiles = new HashSet<Document.SourceFile>();
                 var stack = new Stack<EnvDTE.ProjectItem>();
+                int skippedFileCount = 0;
 
                 foreach (EnvDTE.ProjectItem item in loadedProject.ShellProject.dteProject.ProjectItems) {
                     stack.Push(item);
@@ -529,15 +633,13 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                                 candidates.Any(sf => sf.LoadedProject.ProjectGuid == loadedProject.ProjectGuid)) {
 
                                 _solutionSourceFileGraph.UpdateSourceFileWithIncludes(newSourceFile, newIncludeEntries);
-                                Helpers.Diagnostic.Logger.LogDebug($"updated sourceFile: {filePath} [{loadedProject.UniqueName}]");
                             }
                             else {
                                 _solutionSourceFileGraph.AddSourceFileWithIncludes(newSourceFile, newIncludeEntries);
-                                Helpers.Diagnostic.Logger.LogDebug($"added sourceFile: {filePath} [{loadedProject.UniqueName}]");
                             }
                         }
                         else {
-                            Helpers.Diagnostic.Logger.LogDebug($"non cpp file: {filePath} [{loadedProject.UniqueName}]");
+                            skippedFileCount++;
                         }
                     }
 
@@ -552,27 +654,47 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 // UpdateProjectGraph должен быть синхронизацией, а не только add/update.
                 // Например, если Old.cpp удалили из проекта, но оставили на диске, DTE больше не
                 // обнаружит его, поэтому старое представление необходимо явно убрать из графа.
-                var staleProjectFiles = _solutionSourceFileGraph.AllSourceFiles
-                    .Where(sourceFile => sourceFile.LoadedProject.ProjectGuid == loadedProject.ProjectGuid)
+                var staleProjectFiles = _solutionSourceFileGraph.GetSourceFilesForProject(loadedProject.ProjectGuid)
                     .Where(sourceFile => !discoveredProjectFiles.Contains(sourceFile))
                     .ToList();
 
                 foreach (var staleProjectFile in staleProjectFiles) {
                     _solutionSourceFileGraph.RemoveSourceFile(staleProjectFile);
-                    Helpers.Diagnostic.Logger.LogDebug($"removed stale sourceFile: {staleProjectFile.FilePath} [{loadedProject.UniqueName}]");
                 }
+
+                Helpers.Diagnostic.Logger.LogDebug(
+                    $"[IncludeDependencyAnalyzerService] Project graph synchronized: '{loadedProject.UniqueName}', " +
+                    $"C/C++ files={discoveredProjectFiles.Count}, skipped items={skippedFileCount}, removed={staleProjectFiles.Count}."
+                );
             }
             finally {
-                //Console.Beep(700, 500);
                 _buildingProjectGraphInProcess = false;
             }
         }
 
 
         private List<Document.IncludeEntry> ExtractRawIncludes(string filePath) {
-            // Читаем весь файл потоково. Старый лимит в 10 строк был только оптимизацией и терял
-            // include после license header, комментариев, define'ов или обычного кода.
-            return CppIncludeParser.ParseFile(filePath);
+            var fileInfo = new FileInfo(filePath);
+            long lastWriteTimeUtcTicks = fileInfo.LastWriteTimeUtc.Ticks;
+            long length = fileInfo.Length;
+
+            lock (_includeParseCacheLock) {
+                if (_includeParseCache.TryGetValue(filePath, out var cached) &&
+                    cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks &&
+                    cached.Length == length) {
+
+                    return cached.IncludeEntries;
+                }
+            }
+
+            // Один физический shared-файл может иметь представления в нескольких проектах.
+            // Текст парсим один раз, а разрешение include всё равно выполняется в каждом project context.
+            var includeEntries = CppIncludeParser.ParseFile(filePath);
+            lock (_includeParseCacheLock) {
+                _includeParseCache[filePath] = new IncludeParseCacheEntry(lastWriteTimeUtcTicks, length, includeEntries);
+            }
+
+            return includeEntries;
         }
 
 
@@ -734,6 +856,12 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             return _supportedCppExtensions.Contains(Path.GetExtension(filePath));
         }
 
+        private bool IsCppProjectNode(VsShell.Project.LoadedProject loadedProject) {
+            string extension = Path.GetExtension(loadedProject.UniqueName);
+            return string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".vcxitems", StringComparison.OrdinalIgnoreCase);
+        }
+
 
         private bool IsProjectInputPath(string filePath) {
             string extension = Path.GetExtension(filePath);
@@ -747,6 +875,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
         private void ClearAnalysisState() {
             _delayedFileChangeTimer?.Stop();
+            _graphBuildCancellation?.Cancel();
 
             // DirectoryWatcher и MSBuild watcher работают в фоновых потоках. Сначала отписываемся,
             // затем освобождаем ресурсы, чтобы закрытый solution не поставил новую UI-задачу в очередь.
@@ -769,6 +898,28 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
             lock (_pendingChangedFiles) {
                 _pendingChangedFiles.Clear();
+            }
+        }
+
+        private sealed class ProjectFilesSnapshot {
+            public VsShell.Project.LoadedProject LoadedProject { get; }
+            public IReadOnlyList<string> FilePaths { get; }
+
+            public ProjectFilesSnapshot(VsShell.Project.LoadedProject loadedProject, IReadOnlyList<string> filePaths) {
+                this.LoadedProject = loadedProject;
+                this.FilePaths = filePaths;
+            }
+        }
+
+        private sealed class IncludeParseCacheEntry {
+            public long LastWriteTimeUtcTicks { get; }
+            public long Length { get; }
+            public List<Document.IncludeEntry> IncludeEntries { get; }
+
+            public IncludeParseCacheEntry(long lastWriteTimeUtcTicks, long length, List<Document.IncludeEntry> includeEntries) {
+                this.LastWriteTimeUtcTicks = lastWriteTimeUtcTicks;
+                this.Length = length;
+                this.IncludeEntries = includeEntries;
             }
         }
 

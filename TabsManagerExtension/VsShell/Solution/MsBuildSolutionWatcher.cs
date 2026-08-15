@@ -66,8 +66,6 @@ namespace TabsManagerExtension.VsShell.Solution {
         }
 
         public MsBuildProjectAnalyzer(string projectFilePath, IReadOnlyDictionary<string, string> globalProperties) {
-            MsBuildEnvironment.EnsureInitialized();
-
             _projectFilePath = Path.GetFullPath(projectFilePath);
             _globalProperties = globalProperties.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
 
@@ -407,6 +405,38 @@ namespace TabsManagerExtension.VsShell.Solution {
             this.SynchronizeProjects(projects);
         }
 
+        public MsBuildSolutionWatcher(IEnumerable<ProjectEvaluationInput> projectInputs) {
+            foreach (var projectInput in projectInputs) {
+                var analyzer = new MsBuildProjectAnalyzer(projectInput.FullPath, projectInput.GlobalProperties);
+                analyzer.IncludeEnvironmentChanged += this.OnAnalyzerIncludeEnvironmentChanged;
+                _analyzers[projectInput.FullPath] = analyzer;
+            }
+        }
+
+        public void AttachDteProjects(IEnumerable<ProjectEvaluationInput> projectInputs) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            foreach (var projectInput in projectInputs) {
+                _dteProjects[projectInput.FullPath] = projectInput.DteProject;
+            }
+        }
+
+        public static IReadOnlyList<ProjectEvaluationInput> CaptureProjectEvaluationInputs(IEnumerable<EnvDTE.Project> projects) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            MsBuildEnvironment.EnsureInitialized();
+
+            var result = new List<ProjectEvaluationInput>();
+            foreach (var project in projects) {
+                if (!MsBuildSolutionWatcher.TryGetCppProjectPath(project, out string fullPath)) {
+                    continue;
+                }
+
+                result.Add(new ProjectEvaluationInput(fullPath, project, MsBuildSolutionWatcher.GetActiveGlobalProperties(project)));
+            }
+
+            return result;
+        }
+
         public void Dispose() {
             if (_disposed) {
                 return;
@@ -427,21 +457,12 @@ namespace TabsManagerExtension.VsShell.Solution {
 
             var currentProjectPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var project in projects) {
-                string fullPath;
-                try {
-                    fullPath = Path.GetFullPath(project.FullName);
-                }
-                catch (Exception ex) {
-                    Helpers.Diagnostic.Logger.LogWarning($"[MsBuildSolutionWatcher] Skip project with invalid path: {ex.Message}");
-                    continue;
-                }
-
-                if (!File.Exists(fullPath)) {
+                if (!MsBuildSolutionWatcher.TryGetCppProjectPath(project, out string fullPath)) {
                     continue;
                 }
 
                 currentProjectPaths.Add(fullPath);
-                this.AddOrUpdateProject(project);
+                this.AddOrUpdateProject(project, fullPath);
             }
 
             foreach (string staleProjectPath in _analyzers.Keys.Where(path => !currentProjectPaths.Contains(path)).ToList()) {
@@ -452,10 +473,15 @@ namespace TabsManagerExtension.VsShell.Solution {
         public void AddOrUpdateProject(EnvDTE.Project project) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            string fullPath = Path.GetFullPath(project.FullName);
-            if (!File.Exists(fullPath)) {
+            if (!MsBuildSolutionWatcher.TryGetCppProjectPath(project, out string fullPath)) {
                 return;
             }
+
+            this.AddOrUpdateProject(project, fullPath);
+        }
+
+        private void AddOrUpdateProject(EnvDTE.Project project, string fullPath) {
+            ThreadHelper.ThrowIfNotOnUIThread();
 
             var globalProperties = MsBuildSolutionWatcher.GetActiveGlobalProperties(project);
             _dteProjects[fullPath] = project;
@@ -471,7 +497,10 @@ namespace TabsManagerExtension.VsShell.Solution {
         }
 
         public void RemoveProject(string projectPath) {
-            string fullPath = Path.GetFullPath(projectPath);
+            if (!MsBuildSolutionWatcher.TryGetFullPath(projectPath, out string fullPath)) {
+                return;
+            }
+
             if (_analyzers.TryGetValue(fullPath, out var analyzer)) {
                 analyzer.IncludeEnvironmentChanged -= this.OnAnalyzerIncludeEnvironmentChanged;
                 analyzer.Dispose();
@@ -484,13 +513,31 @@ namespace TabsManagerExtension.VsShell.Solution {
         public IReadOnlyList<string> GetIncludeDirectoriesFor(string projectPath) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            string fullPath = Path.GetFullPath(projectPath);
+            if (!MsBuildSolutionWatcher.TryGetFullPath(projectPath, out string fullPath)) {
+                return Array.Empty<string>();
+            }
+
             if (!_analyzers.TryGetValue(fullPath, out var analyzer)) {
                 return Array.Empty<string>();
             }
 
             if (_dteProjects.TryGetValue(fullPath, out var dteProject)) {
                 analyzer.EnsureEvaluationContext(MsBuildSolutionWatcher.GetActiveGlobalProperties(dteProject));
+            }
+
+            return analyzer.IncludeDirectories;
+        }
+
+        /// <summary>
+        /// Возвращает уже вычисленные include-каталоги без обращения к DTE.
+        /// Этот вариант используется при фоновом построении графа после того, как active context
+        /// был зафиксирован в UI-потоке при создании анализатора.
+        /// </summary>
+        public IReadOnlyList<string> GetCachedIncludeDirectoriesFor(string projectPath) {
+            if (!MsBuildSolutionWatcher.TryGetFullPath(projectPath, out string fullPath) ||
+                !_analyzers.TryGetValue(fullPath, out var analyzer)) {
+
+                return Array.Empty<string>();
             }
 
             return analyzer.IncludeDirectories;
@@ -518,6 +565,41 @@ namespace TabsManagerExtension.VsShell.Solution {
             this.IncludeEnvironmentChanged?.Invoke(projectPath);
         }
 
+        private static bool TryGetCppProjectPath(EnvDTE.Project project, out string fullPath) {
+            fullPath = string.Empty;
+
+            string projectPath;
+            try {
+                projectPath = project.FullName;
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogWarning($"[MsBuildSolutionWatcher] Skip project whose path is unavailable: {ex.Message}");
+                return false;
+            }
+
+            if (!MsBuildSolutionWatcher.TryGetFullPath(projectPath, out fullPath)) {
+                return false;
+            }
+
+            return string.Equals(Path.GetExtension(fullPath), ".vcxproj", StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath);
+        }
+
+        private static bool TryGetFullPath(string path, out string fullPath) {
+            fullPath = string.Empty;
+            if (string.IsNullOrWhiteSpace(path)) {
+                return false;
+            }
+
+            try {
+                fullPath = Path.GetFullPath(path);
+                return true;
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) {
+                Helpers.Diagnostic.Logger.LogWarning($"[MsBuildSolutionWatcher] Skip project with invalid path: {ex.Message}");
+                return false;
+            }
+        }
+
         private static Dictionary<string, string> GetActiveGlobalProperties(EnvDTE.Project project) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -535,6 +617,22 @@ namespace TabsManagerExtension.VsShell.Solution {
             }
 
             return result;
+        }
+
+        public sealed class ProjectEvaluationInput {
+            public string FullPath { get; }
+            public EnvDTE.Project DteProject { get; }
+            public IReadOnlyDictionary<string, string> GlobalProperties { get; }
+
+            public ProjectEvaluationInput(
+                string fullPath,
+                EnvDTE.Project dteProject,
+                IReadOnlyDictionary<string, string> globalProperties
+            ) {
+                this.FullPath = fullPath;
+                this.DteProject = dteProject;
+                this.GlobalProperties = globalProperties;
+            }
         }
     }
 }

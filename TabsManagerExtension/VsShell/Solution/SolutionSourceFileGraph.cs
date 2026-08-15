@@ -35,6 +35,7 @@ namespace TabsManagerExtension.VsShell.Solution {
         private readonly Dictionary<Document.ResolvedIncludeEntry, List<Document.SourceFile>> _resolvedIncludeEntryToSourceFilesMap = new();
         private readonly Dictionary<string, List<Document.SourceFile>> _resolvedIncludePathsToSourceFilesMap = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<Document.SourceFile>> _sourceFileRepresentationsMap = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<Guid, HashSet<Document.SourceFile>> _projectSourceFilesMap = new();
 
         private readonly MsBuildSolutionWatcher _msBuildSolutionWatcher;
 
@@ -145,6 +146,14 @@ namespace TabsManagerExtension.VsShell.Solution {
             return false;
         }
 
+        public IReadOnlyCollection<Document.SourceFile> GetSourceFilesForProject(Guid projectGuid) {
+            if (_projectSourceFilesMap.TryGetValue(projectGuid, out var sourceFiles)) {
+                return sourceFiles.ToList();
+            }
+
+            return Array.Empty<Document.SourceFile>();
+        }
+
         public void Clear() {
             _sourceFileToIncludeEntriesMap.Clear();
             _includeEntryToSourceFilesMap.Clear();
@@ -152,6 +161,7 @@ namespace TabsManagerExtension.VsShell.Solution {
             _resolvedIncludeEntryToSourceFilesMap.Clear();
             _resolvedIncludePathsToSourceFilesMap.Clear();
             _sourceFileRepresentationsMap.Clear();
+            _projectSourceFilesMap.Clear();
         }
 
 
@@ -227,6 +237,12 @@ namespace TabsManagerExtension.VsShell.Solution {
             if (!sourceFilePathsRepresentationList.Any(sf => StringComparer.OrdinalIgnoreCase.Equals(sf.LoadedProject.UniqueName, sourceFile.LoadedProject.UniqueName))) {
                 sourceFilePathsRepresentationList.Add(sourceFile);
             }
+
+            if (!_projectSourceFilesMap.TryGetValue(sourceFile.LoadedProject.ProjectGuid, out var projectSourceFiles)) {
+                projectSourceFiles = new HashSet<Document.SourceFile>();
+                _projectSourceFilesMap[sourceFile.LoadedProject.ProjectGuid] = projectSourceFiles;
+            }
+            projectSourceFiles.Add(sourceFile);
         }
 
 
@@ -269,6 +285,13 @@ namespace TabsManagerExtension.VsShell.Solution {
                 sourceFilePathsRepresentationList.RemoveAll(sf => StringComparer.OrdinalIgnoreCase.Equals(sf.LoadedProject.UniqueName, sourceFile.LoadedProject.UniqueName));
                 if (sourceFilePathsRepresentationList.Count == 0) {
                     _sourceFileRepresentationsMap.Remove(sourceFile.FilePath);
+                }
+            }
+
+            if (_projectSourceFilesMap.TryGetValue(sourceFile.LoadedProject.ProjectGuid, out var projectSourceFiles)) {
+                projectSourceFiles.Remove(sourceFile);
+                if (projectSourceFiles.Count == 0) {
+                    _projectSourceFilesMap.Remove(sourceFile.LoadedProject.ProjectGuid);
                 }
             }
         }
