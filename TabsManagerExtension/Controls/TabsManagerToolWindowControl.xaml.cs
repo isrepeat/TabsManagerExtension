@@ -887,6 +887,7 @@ namespace TabsManagerExtension.Controls {
         private void OnMoveTabItemToRelatedProject(object parameter) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnMoveTabItemToRelatedProject()");
             ThreadHelper.ThrowIfNotOnUIThread();
+            this.VirtualMenuControl.HideImmediately();
 
             if (parameter is DocumentProjectReferencesInfo.RefEntry refEntry) {
                 this.MoveDocumentToProjectGroup(refEntry.DocumentEntryBase);
@@ -931,26 +932,150 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        private void ProjectContextIncludersButton_Click(object sender, RoutedEventArgs e) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            e.Handled = true;
+
+            if (sender is not Button button ||
+                button.DataContext is not Helpers.MenuItemCommand menuItem ||
+                menuItem.CommandParameterContext is not object projectContext) {
+
+                return;
+            }
+
+            if (this.VirtualMenuControl.IsChildMenuOpen &&
+                ReferenceEquals(this.VirtualMenuControl.CurrentChildMenuDataContext, projectContext)) {
+
+                this.VirtualMenuControl.HideChild();
+                return;
+            }
+
+            this.ShowProjectContextIncludersMenu(button, projectContext);
+        }
+
+        private void ProjectContextMenuItem_MouseEnter(object sender, MouseEventArgs e) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (!this.VirtualMenuControl.IsChildMenuOpen ||
+                sender is not MenuItem menuItem ||
+                menuItem.DataContext is not Helpers.MenuItemCommand menuItemCommand) {
+
+                return;
+            }
+
+            object projectContext = menuItemCommand.CommandParameterContext;
+            if (!ReferenceEquals(this.VirtualMenuControl.CurrentChildMenuDataContext, projectContext)) {
+                this.ShowProjectContextIncludersMenu(menuItem, projectContext);
+            }
+        }
+
+        private void ShowProjectContextIncludersMenu(FrameworkElement anchor, object projectContext) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var sourcePaths = this.GetProjectContextSwitchSourcePaths(projectContext);
+            string projectName = projectContext switch {
+                DocumentProjectReferencesInfo.RefEntry refEntry => refEntry.ProjectEntry.BaseViewModel.Name,
+                DocumentProjectReferencesInfo.GroupContextEntry groupContext => groupContext.ProjectEntry.BaseViewModel.Name,
+                _ => "Project"
+            };
+
+            var childItems = new ObservableCollection<Helpers.IMenuItem> {
+                new Helpers.MenuItemHeader { Header = projectName }
+            };
+
+            if (sourcePaths.Count == 0) {
+                childItems.Add(new Helpers.MenuItemHeader { Header = "No transitive including files" });
+            }
+            else {
+                foreach (string sourcePath in sourcePaths) {
+                    childItems.Add(new Helpers.MenuItemCommand {
+                        Header = Path.GetFileName(sourcePath),
+                        Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProjectFile),
+                        CommandParameterContext = new ProjectContextSourceEntry(projectContext, sourcePath)
+                    });
+                }
+            }
+
+            Point screenPoint = anchor.ex_ToDpiAwareScreen(new Point(anchor.ActualWidth + 8, 0));
+            this.VirtualMenuControl.ShowChild(screenPoint, projectContext, childItems);
+        }
+
+        private IReadOnlyList<string> GetProjectContextSwitchSourcePaths(object projectContext) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            IEnumerable<DocumentProjectReferencesInfo.RefEntry> references = projectContext switch {
+                DocumentProjectReferencesInfo.RefEntry refEntry => new[] { refEntry },
+                DocumentProjectReferencesInfo.GroupContextEntry groupContext => groupContext.DocumentReferences,
+                _ => Array.Empty<DocumentProjectReferencesInfo.RefEntry>()
+            };
+
+            return references
+                .SelectMany(reference => GetProjectContextSwitchSourcePaths(reference))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private void OnMoveTabItemToRelatedProjectFile(object parameter) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            this.VirtualMenuControl.HideImmediately();
+
+            if (parameter is not ProjectContextSourceEntry sourceEntry) {
+                return;
+            }
+
+            var projectEntry = sourceEntry.ProjectContext switch {
+                DocumentProjectReferencesInfo.RefEntry refEntry => refEntry.ProjectEntry,
+                DocumentProjectReferencesInfo.GroupContextEntry groupContext => groupContext.ProjectEntry,
+                _ => null
+            };
+            if (projectEntry?.MultiState.Current is not VsShell.Project.LoadedProject loadedProject) {
+                return;
+            }
+
+            var sourceDocument = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance
+                .SourcesRepresentationsTable
+                .GetDocumentByProjectAndDocumentPath(projectEntry.BaseViewModel, sourceEntry.SourcePath);
+            if (sourceDocument?.BaseViewModel.HierarchyItemEntry.BaseViewModel is not VsShell.Hierarchy.RealHierarchyItem hierarchyItem) {
+                Helpers.Diagnostic.Logger.LogWarning($"[OnMoveTabItemToRelatedProjectFile] Cannot find '{sourceEntry.SourcePath}' in project '{projectEntry.BaseViewModel.UniqueName}'.");
+                return;
+            }
+
+            int hr = VsShell.Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
+                loadedProject.ProjectHierarchy.VsRealHierarchy,
+                hierarchyItem.ItemId
+            );
+
+            ErrorHandler.ThrowOnFailure(hr);
+        }
+
+        private static VsShell.Document.Document? GetCurrentProjectContextDocument(VsShell.Document.DocumentEntryBase entry) {
+            return entry switch {
+                VsShell.Document.ExternalIncludeEntry externalIncludeEntry =>
+                    externalIncludeEntry.MultiState.Current as VsShell.Document.Document,
+                VsShell.Document.SharedItemEntry sharedItemEntry =>
+                    sharedItemEntry.MultiState.Current as VsShell.Document.Document,
+                _ => null
+            };
+        }
+
+        private static IReadOnlyList<string> GetProjectContextSwitchSourcePaths(DocumentProjectReferencesInfo.RefEntry reference) {
+            var document = GetCurrentProjectContextDocument(reference.DocumentEntryBase);
+            var targetProject = reference.ProjectEntry.MultiState.Current as VsShell.Project.LoadedProject;
+            return document != null && targetProject != null
+                ? document.GetProjectContextSwitchSourcePaths(targetProject)
+                : Array.Empty<string>();
+        }
+
         private IReadOnlyDictionary<DocumentProjectReferencesInfo.RefEntry, string> BuildGroupContextSwitchPlan(
             IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> documentReferences
             ) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            VsShell.Document.Document? GetCurrentDocument(VsShell.Document.DocumentEntryBase entry) {
-                return entry switch {
-                    VsShell.Document.ExternalIncludeEntry externalIncludeEntry =>
-                        externalIncludeEntry.MultiState.Current as VsShell.Document.Document,
-                    VsShell.Document.SharedItemEntry sharedItemEntry =>
-                        sharedItemEntry.MultiState.Current as VsShell.Document.Document,
-                    _ => null
-                };
-            }
-
             var candidatesByDocument = documentReferences.ToDictionary(
                 reference => reference,
-                reference => GetCurrentDocument(reference.DocumentEntryBase) is VsShell.Document.Document document
-                    ? document.GetProjectContextSwitchSourcePaths().ToHashSet(StringComparer.OrdinalIgnoreCase)
-                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                reference => GetProjectContextSwitchSourcePaths(reference).ToHashSet(StringComparer.OrdinalIgnoreCase)
             );
 
             var openDocumentPaths = PackageServices.Dte2.Documents
@@ -1118,6 +1243,7 @@ namespace TabsManagerExtension.Controls {
         private void OnTabItemVirtualMenuOpen(object parameter) {
             //using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnTabItemVirtualMenuOpen()");
             ThreadHelper.ThrowIfNotOnUIThread();
+            this.VirtualMenuControl.HideChild();
 
             if (parameter is Controls.MenuControl.MenuOpeningArgs virtualMenuOpeningArgs) {
                 if (virtualMenuOpeningArgs.DataContext is TabItemBase tabItem) {
@@ -1270,10 +1396,22 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnTabItemVirtualMenuClosed(object parameter) {
+            this.VirtualMenuControl.HideChild();
+
             if (parameter is Controls.MenuControl.MenuClosedArgs virtualMenuClosedArgs) {
                 if (virtualMenuClosedArgs.DataContext is TabItemBase tabItem) {
                     tabItem.Metadata.SetFlag("IsVirtualMenuOpenned", false);
                 }
+            }
+        }
+
+        private sealed class ProjectContextSourceEntry {
+            public object ProjectContext { get; }
+            public string SourcePath { get; }
+
+            public ProjectContextSourceEntry(object projectContext, string sourcePath) {
+                this.ProjectContext = projectContext;
+                this.SourcePath = sourcePath;
             }
         }
 

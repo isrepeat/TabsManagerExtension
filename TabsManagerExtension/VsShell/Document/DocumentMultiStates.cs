@@ -94,10 +94,11 @@ namespace TabsManagerExtension.VsShell.Document {
             base.OnCommonStatePropertyChanged(sender, e);
         }
 
-        public IReadOnlyList<string> GetProjectContextSwitchSourcePaths() {
+        public IReadOnlyList<string> GetProjectContextSwitchSourcePaths(Project.LoadedProject? targetProject = null) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (base.ProjectBaseViewModel is not Project.LoadedProject ownProject) {
+            targetProject ??= base.ProjectBaseViewModel as Project.LoadedProject;
+            if (targetProject == null) {
                 return Array.Empty<string>();
             }
 
@@ -107,17 +108,11 @@ namespace TabsManagerExtension.VsShell.Document {
                 return Array.Empty<string>();
             }
 
-            var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
             return includeDependencyAnalyzer
                 .GetTransitiveFilesIncludersByIncludePath(base.HierarchyItemEntry.BaseViewModel.FilePath)
                 .Where(sourceFile =>
-                    sourceFile.LoadedProject.Equals(ownProject) &&
+                    sourceFile.LoadedProject.ProjectGuid == targetProject.ProjectGuid &&
                     string.Equals(System.IO.Path.GetExtension(sourceFile.FilePath), ".cpp", StringComparison.OrdinalIgnoreCase))
-                // Запись в графе сама по себе недостаточна: файл должен существовать в hierarchy
-                // именно целевого проекта. Например, одинаковый Engine.cpp из другого project context
-                // нельзя использовать для переключения выбранного shared-header в Engine.
-                .Where(sourceFile => solutionHierarchyAnalyzer.SourcesRepresentationsTable
-                    .GetDocumentByProjectAndDocumentPath(base.ProjectBaseViewModel, sourceFile.FilePath) != null)
                 .Select(sourceFile => sourceFile.FilePath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();

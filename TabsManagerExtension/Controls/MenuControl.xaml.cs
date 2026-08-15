@@ -66,7 +66,7 @@ namespace TabsManagerExtension.Controls {
         public event EventHandler MouseEnteredPopup;
         public event EventHandler MouseLeftPopup;
 
-        private MenuClosedArgs _menuControlClosedArgs = null;
+        private MenuClosedArgs? _menuControlClosedArgs;
 
         public MenuControl() {
             this.InitializeComponent();
@@ -77,17 +77,19 @@ namespace TabsManagerExtension.Controls {
         }
 
         public void ShowMenu(object dataContext, PlacementMode placementMode, bool isStaysOpen, Point? screenPosition = null) {
+            _menuControlClosedArgs = new MenuControl.MenuClosedArgs {
+                DataContext = dataContext
+            };
+
             if (this.OpenCommand != null && this.OpenCommand.CanExecute(null)) {
                 var request = new MenuControl.MenuOpeningArgs {
-                    DataContext = dataContext
-                };
-                _menuControlClosedArgs = new MenuControl.MenuClosedArgs {
                     DataContext = dataContext
                 };
 
                 // Через команду заполняются MenuItems.
                 this.OpenCommand.Execute(request);
                 if (!request.ShouldOpen) {
+                    _menuControlClosedArgs = null;
                     return;
                 }
             }
@@ -102,11 +104,12 @@ namespace TabsManagerExtension.Controls {
 
 
         public void UpdateMenu(object dataContext, Point? screenPosition = null) {
+            _menuControlClosedArgs = new MenuControl.MenuClosedArgs {
+                DataContext = dataContext
+            };
+
             if (this.OpenCommand != null && this.OpenCommand.CanExecute(null)) {
                 var request = new MenuControl.MenuOpeningArgs {
-                    DataContext = dataContext
-                };
-                _menuControlClosedArgs = new MenuControl.MenuClosedArgs {
                     DataContext = dataContext
                 };
 
@@ -133,14 +136,14 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void MenuPopup_OnClosed(object sender, System.EventArgs e) {
-            if (_menuControlClosedArgs == null) { // not expected case.
-                _menuControlClosedArgs = new MenuClosedArgs { };
-                System.Diagnostics.Debugger.Break();
+            var closedArgs = _menuControlClosedArgs;
+            _menuControlClosedArgs = null;
+            if (closedArgs == null) {
+                return;
             }
 
-            if (this.CloseCommand != null && this.CloseCommand.CanExecute(_menuControlClosedArgs)) {
-                this.CloseCommand.Execute(_menuControlClosedArgs);
-                _menuControlClosedArgs = null;
+            if (this.CloseCommand != null && this.CloseCommand.CanExecute(closedArgs)) {
+                this.CloseCommand.Execute(closedArgs);
             }
         }
         private void MenuPopup_OnMouseEnter(object sender, MouseEventArgs e) {
