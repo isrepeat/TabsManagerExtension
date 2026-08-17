@@ -23,6 +23,9 @@ using Microsoft.VisualStudio.VCCodeModel;
 using Microsoft.VisualStudio.TextManager.Interop;
 using Task = System.Threading.Tasks.Task;
 
+// Add AUTO_ENABLE_CUSTOM_TABS to DefineConstants to restore automatic left layout
+// and tab replacement. Keep it undefined while diagnosing manual activation.
+
 [assembly: Helpers.Attributes.CodeAnalyzerEnableLogs]
 
 #if NET_FRAMEWORK_472
@@ -34,14 +37,17 @@ namespace System.Runtime.CompilerServices {
 
 namespace TabsManagerExtension {
     /// <summary>
-    /// Благодаря <b>[ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]</b>
-    /// новоустановленный пакет загрузиться в бэкграунде (через ~5c), после загрузки решения.
-    /// Далее мы используем EarlyPackageLoadHackToolWindow, чтобы пакет загружался сразу при запуске VS.
+    /// ProvideAutoLoad просит Visual Studio автоматически загрузить расширение в фоновом режиме.
+    /// NoSolution действует, когда решение не открыто, а SolutionExists — когда решение открыто.
+    /// Поэтому расширение загружается в обоих возможных состояниях Visual Studio без старого хака с Tool Window.
     /// </summary>
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
+    [ProvideAutoLoad(UIContextGuids80.NoSolution, PackageAutoLoadFlags.BackgroundLoad)]
     [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
     [ProvideMenuResource("Menus.ctmenu", 1)]
+#if ENABLE_EARLY_PACKAGE_LOAD_HACK
     [ProvideToolWindow(typeof(ToolWindows.EarlyPackageLoadHackToolWindow))]
+#endif
     [ProvideToolWindow(typeof(ToolWindows.TabsManagerToolWindow))]
     [Guid(TabsManagerExtensionPackage.PackageGuidString)]
     public sealed class TabsManagerExtensionPackage : AsyncPackage {
@@ -62,8 +68,27 @@ namespace TabsManagerExtension {
 
             this.InitializeEvents();
 
+#if ENABLE_EARLY_PACKAGE_LOAD_HACK
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
+#endif
             await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
+            this.ShowLoadedStatusAfterShellBecomesIdle();
+            this.RestoreCustomTabsAfterShellBecomesIdle();
+        }
+
+        private void RestoreCustomTabsAfterShellBecomesIdle() {
+            if (!Configuration.TabsManagerConfigurationService.AutoLoadCustomTabs) {
+                return;
+            }
+
+            this.JoinableTaskFactory.RunAsync(async () => {
+                await Task.Delay(TimeSpan.FromSeconds(2), this.DisposalToken);
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
+
+                if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
+                    VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
+                }
+            }).FileAndForget("TabsManagerExtension/RestoreCustomTabs");
         }
 
 
@@ -79,7 +104,9 @@ namespace TabsManagerExtension {
         private void OnSolutionLoaded(string solutionName) {
             Helpers.Diagnostic.Logger.LogDebug($"[Package] OnSolutionLoaded(): solutionName = {solutionName}");
             PackageServices.Invalidate();
+            this.ShowLoadedStatusAfterShellBecomesIdle();
 
+#if AUTO_ENABLE_CUSTOM_TABS
             if (VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
                 return;
             }
@@ -87,6 +114,19 @@ namespace TabsManagerExtension {
             VsixThreadHelper.RunOnVsThread(() => {
                 VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
             });
+#endif
+        }
+
+        private void ShowLoadedStatusAfterShellBecomesIdle() {
+            this.JoinableTaskFactory.RunAsync(async () => {
+                // Solution loading writes its own status messages after package initialization.
+                // Wait until those messages finish so the activation confirmation remains visible.
+                await Task.Delay(TimeSpan.FromSeconds(2), this.DisposalToken);
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
+
+                var statusBar = await this.GetServiceAsync(typeof(SVsStatusbar)) as IVsStatusbar;
+                statusBar?.SetText("Tabs Manager loaded — use Tools > Toggle Tabs Manager");
+            }).FileAndForget("TabsManagerExtension/ShowLoadedStatus");
         }
 
 
@@ -94,6 +134,7 @@ namespace TabsManagerExtension {
             Helpers.Diagnostic.Logger.LogDebug($"[Package] OnSolutionClosed(): solutionName = {solutionName}");
             PackageServices.Invalidate();
 
+#if AUTO_ENABLE_CUSTOM_TABS
             if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
                 return;
             }
@@ -101,6 +142,7 @@ namespace TabsManagerExtension {
             VsixThreadHelper.RunOnVsThread(() => {
                 VsixVisualTreeHelper.Instance.ToggleCustomTabs(false);
             });
+#endif
         }
     }
 }

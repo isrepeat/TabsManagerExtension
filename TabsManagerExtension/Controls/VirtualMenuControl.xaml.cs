@@ -19,6 +19,17 @@ namespace TabsManagerExtension.Controls {
                 typeof(VirtualMenuControl),
                 new PropertyMetadata(null));
 
+        public ObservableCollection<Helpers.IMenuItem> ChildVirtualMenuItems {
+            get => (ObservableCollection<Helpers.IMenuItem>)this.GetValue(ChildVirtualMenuItemsProperty);
+            set => this.SetValue(ChildVirtualMenuItemsProperty, value);
+        }
+        public static readonly DependencyProperty ChildVirtualMenuItemsProperty =
+            DependencyProperty.Register(
+                nameof(ChildVirtualMenuItems),
+                typeof(ObservableCollection<Helpers.IMenuItem>),
+                typeof(VirtualMenuControl),
+                new PropertyMetadata(null));
+
 
         public ICommand OnVirtualMenuOpenCommand {
             get => (ICommand)this.GetValue(OnVirtualMenuOpenCommandProperty);
@@ -57,6 +68,8 @@ namespace TabsManagerExtension.Controls {
 
 
         public object CurrentMenuDataContext { get; private set; }
+        public object? CurrentChildMenuDataContext { get; private set; }
+        public bool IsChildMenuOpen => this.ChildVirtualMenu.MenuPopup.IsOpen;
         
         private DispatcherTimer showTimer;
         private DispatcherTimer hideTimer;
@@ -79,8 +92,12 @@ namespace TabsManagerExtension.Controls {
         private void OnLoaded(object sender, RoutedEventArgs e) {
             this.VirtualMenu.MouseEnteredPopup += PopupContent_MouseEnter;
             this.VirtualMenu.MouseLeftPopup += PopupContent_MouseLeave;
+            this.ChildVirtualMenu.MouseEnteredPopup += PopupContent_MouseEnter;
+            this.ChildVirtualMenu.MouseLeftPopup += PopupContent_MouseLeave;
         }
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            this.ChildVirtualMenu.MouseLeftPopup -= PopupContent_MouseLeave;
+            this.ChildVirtualMenu.MouseEnteredPopup -= PopupContent_MouseEnter;
             this.VirtualMenu.MouseLeftPopup -= PopupContent_MouseLeave;
             this.VirtualMenu.MouseEnteredPopup -= PopupContent_MouseEnter;
         }
@@ -152,6 +169,31 @@ namespace TabsManagerExtension.Controls {
             this.InternalHidePopup();
         }
 
+        public void ShowChild(
+            Point position,
+            object dataContext,
+            ObservableCollection<Helpers.IMenuItem> menuItems
+        ) {
+            this.CancelHideTimer();
+            this.CurrentChildMenuDataContext = dataContext;
+            this.ChildVirtualMenuItems = menuItems;
+
+            if (this.ChildVirtualMenu.MenuPopup.IsOpen) {
+                this.ChildVirtualMenu.UpdateMenu(dataContext, position);
+            }
+            else {
+                this.ChildVirtualMenu.ShowMenu(dataContext, PlacementMode.Absolute, isStaysOpen: true, position);
+            }
+
+            this.ChildVirtualMenu._Border.Opacity = this.maxOpacity;
+        }
+
+        public void HideChild() {
+            this.ChildVirtualMenu.MenuPopup.IsOpen = false;
+            this.CurrentChildMenuDataContext = null;
+            this.ChildVirtualMenuItems = new ObservableCollection<Helpers.IMenuItem>();
+        }
+
         /// <summary>
         /// Внутренний метод показа popup.
         /// Устанавливает DataContext, позицию, делает видимым.
@@ -167,6 +209,7 @@ namespace TabsManagerExtension.Controls {
         /// Внутренний метод скрытия popup и сброса состояния.
         /// </summary>
         private void InternalHidePopup() {
+            this.HideChild();
             this.VirtualMenu.MenuPopup.IsOpen = false;
             this.hasUserInteracted = false;
             this.VirtualMenu._Border.Opacity = this.defaultOpacity;

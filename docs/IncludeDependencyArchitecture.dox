@@ -1,0 +1,114 @@
+/**
+@page include_dependency_architecture Граф зависимостей #include
+
+@tableofcontents
+
+@section include_roles Основные классы
+
+- `IncludeDependencyAnalyzerService` — владелец жизненного цикла анализа и публичного API.
+- `CppIncludeParser` — потоково читает C/C++-файлы и создаёт `IncludeEntry`.
+- `MsBuildSolutionWatcher` и `MsBuildProjectAnalyzer` — вычисляют include environment активной
+  `Configuration|Platform` и отслеживают `.vcxproj`, `.props`, `.targets` и project references.
+- `IncludeResolverService` — превращает delimited include в физический путь.
+- `SolutionSourceFileGraph` — хранит прямые и обратные индексы графа.
+- `SourceFile`, `IncludeEntry`, `ResolvedIncludeEntry` — узлы и значения рёбер.
+
+@section include_build_flow Первоначальное построение
+
+@dot
+digraph IncludeBuildFlow {
+    graph [rankdir=LR, bgcolor="#1b1f26", fontname="Segoe UI", fontcolor="#f1f5f9"];
+    node [shape=box, style="rounded,filled", fillcolor="#51421f", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", penwidth=1.2];
+    edge [fontname="Segoe UI", color="#8aa4c2", fontcolor="#d9e2ec", penwidth=1.15];
+
+    solution [label="SolutionLoaded", fillcolor="#253b56"];
+    projects [label="LoadedProject contexts", URL="\ref TabsManagerExtension.VsShell.Project.LoadedProject"];
+    msbuild [label="Evaluate MSBuild\nConfiguration|Platform", URL="\ref TabsManagerExtension.VsShell.Solution.MsBuildSolutionWatcher"];
+    enumerate [label="Обход C/C++ project items"];
+    parse [label="CppIncludeParser\nQuote / Angle / Macro\nConditionUnknown", URL="\ref TabsManagerExtension.VsShell.Solution.Services.CppIncludeParser"];
+    resolve [label="IncludeResolverService", URL="\ref TabsManagerExtension.VsShell.Solution.Services.IncludeResolverService"];
+    source_graph [label="SolutionSourceFileGraph\nforward + reverse indexes", URL="\ref TabsManagerExtension.VsShell.Solution.SolutionSourceFileGraph"];
+    ready [label="IsReady = true", fillcolor="#24473f"];
+
+    solution -> projects;
+    projects -> msbuild;
+    projects -> enumerate;
+    enumerate -> parse [label="каждый файл целиком, потоково"];
+    parse -> resolve [label="каждый delimited include"];
+    msbuild -> resolve [label="include directories"];
+    resolve -> source_graph [label="ResolvedPath или failure reason"];
+    parse -> source_graph [label="raw edges"];
+    source_graph -> ready;
+}
+@enddot
+
+@section include_resolution Разрешение include
+
+@dot
+digraph IncludeResolution {
+    graph [rankdir=TB, bgcolor="#1b1f26", fontname="Segoe UI", fontcolor="#f1f5f9"];
+    node [shape=box, style="rounded,filled", fillcolor="#343a46", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", penwidth=1.2];
+    edge [fontname="Segoe UI", color="#8aa4c2", fontcolor="#d9e2ec", penwidth=1.15];
+
+    entry [label="IncludeEntry"];
+    kind [shape=diamond, label="Kind?"];
+    macro [label="unresolved\nMacroExpression", fillcolor="#552f35", color="#b86b77"];
+    local [label="каталог including file"];
+    dirs [label="evaluated include directories"];
+    found [label="ResolvedPath", fillcolor="#24473f", color="#5d9b8c"];
+    missing [label="unresolved\nNotFound", fillcolor="#552f35", color="#b86b77"];
+
+    entry -> kind;
+    kind -> macro [label="Macro"];
+    kind -> local [label="Quote"];
+    kind -> dirs [label="Angle"];
+    local -> found [label="существует"];
+    local -> dirs [label="не найден"];
+    dirs -> found [label="первое совпадение"];
+    dirs -> missing [label="нет совпадений"];
+}
+@enddot
+
+Quote include (`"Header.h"`) сначала ищется рядом с включающим файлом. Angle include
+(`<Header.h>`) сразу начинает с include environment, поэтому локальный файл с именем `vector`
+не может случайно подменить системный `<vector>`.
+
+@section include_conditions Макросы и условные ветви
+
+Парсер не запускает C++ preprocessor:
+
+- все literal include внутри `#if/#ifdef/#ifndef` сохраняются как потенциальные рёбра с
+  `ConditionUnknown = true`;
+- `#include HEADER_MACRO` сохраняется как `IncludeKind.Macro`, не получает `ResolvedPath` и
+  явно помечается `FailureReason = MacroExpression`;
+- разные ветви конфигурации образуют консервативное объединение зависимостей.
+
+Точный граф конкретной компиляции потребует отдельного источника, например MSVC
+`/sourceDependencies` или `/showIncludes`. Текущий граф предназначен для быстрого анализа
+без обязательной сборки solution.
+
+@section include_incremental Инкрементальное обновление
+
+@dot
+digraph IncrementalUpdate {
+    graph [rankdir=LR, bgcolor="#1b1f26", fontname="Segoe UI", fontcolor="#f1f5f9"];
+    node [shape=box, style="rounded,filled", fillcolor="#273142", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", penwidth=1.2];
+    edge [fontname="Segoe UI", color="#8aa4c2", fontcolor="#d9e2ec", penwidth=1.15];
+
+    source_change [label="source/header changed"];
+    structure_change [label="create/delete/rename\nor project input changed"];
+    reparse [label="повторный parse файла"];
+    sync [label="синхронизация project contexts"];
+    reresolve [label="повторный resolve всех raw edges"];
+    source_graph [label="атомарное обновление индексов"];
+
+    source_change -> reparse -> source_graph;
+    structure_change -> sync -> source_graph;
+    structure_change -> reresolve -> source_graph;
+}
+@enddot
+
+Один физический shared-файл может иметь несколько `SourceFile`-представлений — по одному на
+каждый project context. Обратный BFS остаётся внутри исходного `ProjectGuid`, чтобы ветки Game
+и Editor не смешивались через одинаковый физический путь.
+*/

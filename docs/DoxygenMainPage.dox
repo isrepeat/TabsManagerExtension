@@ -1,0 +1,103 @@
+/**
+@mainpage Архитектура Tabs Manager Extension
+
+@tableofcontents
+
+@section overview Назначение
+
+Tabs Manager Extension — VSIX-расширение для Visual Studio, которое заменяет стандартное
+представление вкладок, отслеживает solution/project/document state и умеет переключать
+project context shared-файлов. Документация строится непосредственно из C#-кода и этих
+Doxygen-страниц; отдельная Markdown-модель архитектуры не используется.
+
+@section architecture_web Карта архитектуры
+
+Главная диаграмма показывает всю систему на уровне подсистем. Стрелка означает основное
+направление использования данных или вызова. Детализация раскрывается кликом по узлу,
+автоматическими inheritance/collaboration/directory graphs и тематическими страницами ниже.
+
+@dot
+digraph ProjectArchitecture {
+    graph [
+        rankdir=TB,
+        newrank=true,
+        bgcolor="#1b1f26",
+        pad=0.2,
+        nodesep=0.45,
+        ranksep=0.6,
+        splines=spline,
+        fontname="Segoe UI",
+        fontsize=12,
+        fontcolor="#f1f5f9",
+        label="Tabs Manager Extension: карта подсистем",
+        labelloc=t
+    ];
+    node [shape=box, style="rounded,filled", fontname="Segoe UI", fontsize=10, margin="0.14,0.09", color="#718096", fontcolor="#f1f5f9", penwidth=1.2];
+    edge [fontname="Segoe UI", fontsize=9, color="#8aa4c2", fontcolor="#d9e2ec", arrowsize=0.75, penwidth=1.15];
+
+    host [label="Visual Studio host\nAsyncPackage + PackageServices", fillcolor="#253b56", URL="\ref TabsManagerExtension.TabsManagerExtensionPackage"];
+    lifecycle [label="Жизненный цикл сервисов\nExtensionServices", fillcolor="#253b56", URL="\ref service_lifecycle"];
+    events [label="Адаптеры событий VS\nsolution / project / document / window", fillcolor="#24473f", URL="\ref TabsManagerExtension.VsShell.Solution.Services.VsSolutionEventsTrackerService"];
+    hierarchy [label="Модель solution hierarchy\nSolutionHierarchyAnalyzerService", fillcolor="#3a3555", URL="\ref TabsManagerExtension.VsShell.Solution.Services.SolutionHierarchyAnalyzerService"];
+    includes [label="Анализ зависимостей #include\nparser + MSBuild + resolver + graph", fillcolor="#51421f", URL="\ref include_dependency_architecture"];
+    domain [label="Project / Document / Hierarchy\nmulti-state domain model", fillcolor="#3a3555", URL="\ref TabsManagerExtension.VsShell.Document.Document"];
+    editor [label="Интеграция с text editor\ncommand filters + overlay", fillcolor="#4a3042", URL="\ref TabsManagerExtension.VsShell.TextEditor.Services.TextEditorFileNavigationCommandFilterService"];
+    ui [label="Tabs Manager UI\nToolWindow + WPF controls + tab state", fillcolor="#4a3042", URL="\ref TabsManagerExtension.Controls.TabsManagerToolWindowControl"];
+    helpers [label="UtilityHelpersLib / HelpersCs\nevents + multi-state + WPF + logging", fillcolor="#343a46", URL="\ref Helpers.ObservableObject"];
+
+    host -> lifecycle [label="Initialize / Shutdown"];
+    host -> ui [label="создаёт ToolWindow"];
+    lifecycle -> events [label="регистрирует trackers"];
+    lifecycle -> hierarchy [label="регистрирует analyzer"];
+    lifecycle -> includes [label="регистрирует analyzer"];
+    lifecycle -> editor [label="регистрирует filters"];
+    events -> hierarchy [label="изменения solution/project"];
+    events -> includes [label="load/unload/change"];
+    events -> editor [label="document/window activation"];
+    hierarchy -> domain [label="строит representations"];
+    includes -> domain [label="project contexts и includers"];
+    domain -> ui [label="view models"];
+    domain -> editor [label="open/switch context"];
+    editor -> ui [label="navigation и overlay"];
+
+    helpers -> lifecycle [style=dashed, color="#718096"];
+    helpers -> events [style=dashed, color="#718096"];
+    helpers -> domain [style=dashed, color="#718096"];
+    helpers -> ui [style=dashed, color="#718096"];
+
+    { rank=same; hierarchy; includes; editor; }
+    { rank=same; domain; ui; helpers; }
+}
+@enddot
+
+@section main_flows Детальные карты
+
+- @subpage include_dependency_architecture "Построение и обновление графа #include"
+- @subpage service_lifecycle "Жизненный цикл глобальных сервисов"
+- Страницы Classes, Namespaces и Files в боковом меню строятся автоматически из исходного кода.
+- Caller/callee graphs включаются точечно командами `@callgraph` и `@callergraph`: глобальный
+  анализ всего C#-дерева очень медленный и без Roslyn остаётся эвристическим.
+
+@section generating Генерация
+
+При первом запуске скачайте portable-инструменты с проверкой SHA-256:
+
+@code{.ps1}
+powershell -NoProfile -ExecutionPolicy Bypass -File docs/BootstrapDocumentationTools.ps1
+@endcode
+
+Затем генерируйте и при необходимости сразу открывайте документацию:
+
+@code{.ps1}
+powershell -NoProfile -ExecutionPolicy Bypass -File docs/GenerateDocumentation.ps1 -Open
+@endcode
+
+Либо вместе со сборкой проекта:
+
+@code{.ps1}
+msbuild TabsManagerExtension.sln /p:GenerateDoxygenDocumentation=true
+@endcode
+
+Скрипт сначала ищет portable Doxygen/Graphviz в `.tools`, затем в `PATH`. Результат создаётся
+в `Doxygen_Documentation_HTML/html/index.html`; обе локальные папки исключены из Git.
+*/

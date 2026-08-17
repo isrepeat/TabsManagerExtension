@@ -5,6 +5,9 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Diagnostics;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.OLE.Interop;
 using Microsoft.VisualStudio.Shell;
@@ -19,16 +22,27 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         TabsManagerExtension.Services.SingletonServiceBase<IncludeDependencyAnalyzerService>,
         TabsManagerExtension.Services.IExtensionService {
 
-        private MsBuildSolutionWatcher _msBuildSolutionWatcher;
-        private SolutionSourceFileGraph _solutionSourceFileGraph;
+        private MsBuildSolutionWatcher _msBuildSolutionWatcher = null!;
+        private SolutionSourceFileGraph _solutionSourceFileGraph = null!;
         private Helpers.DirectoryWatcher? _solutionDirWatcher;
-        private DispatcherTimer _delayedFileChangeTimer;
+        private DispatcherTimer _delayedFileChangeTimer = null!;
 
         private readonly HashSet<Helpers.DirectoryChangedEventArgs> _pendingChangedFiles = new();
 
-        private string _lastLoadedSolutionName;
+        private string? _lastLoadedSolutionName;
         private bool _buildingSolutionGraphInProcess = false;
         private bool _buildingProjectGraphInProcess = false;
+        private int _msBuildRefreshQueued = 0;
+        private volatile bool _isShuttingDown = false;
+        private CancellationTokenSource? _graphBuildCancellation;
+        private readonly object _includeParseCacheLock = new();
+        private readonly Dictionary<string, IncludeParseCacheEntry> _includeParseCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly HashSet<string> _supportedCppExtensions = new(StringComparer.OrdinalIgnoreCase) {
+            ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp",
+            ".c", ".cc", ".cpp", ".cxx", ".c++", ".ixx", ".cppm",
+            ".m", ".mm", ".cu", ".cuh",
+        };
 
         public IncludeDependencyAnalyzerService() { }
 
@@ -46,18 +60,23 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         public void Initialize() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
-
-            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded += this.OnProjectLoaded;
-            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded += this.OnProjectUnloaded;
-
-            // Используем таймер для отложенной обработки изменённых файлов:
-            // обработка произойдёт только через заданный интервал после последнего события.
+            // DispatcherTimer выполняет отложенную обработку изменений файлов в UI-потоке.
+            // Создаём его до InvokeForLastHandlerIfTriggered(): этот вызов немедленно сообщает сервису
+            // о ранее открытом решении и может запустить наблюдение за файлами прямо внутри Initialize().
+            // Если таймер создать позже, первое событие изменения файла обратится к полю со значением null.
+            _isShuttingDown = false;
             _delayedFileChangeTimer = new DispatcherTimer {
                 Interval = TimeSpan.FromMilliseconds(300)
             };
             _delayedFileChangeTimer.Tick += (_, _) => this.OnDelayedFileChangeTimerTick();
+
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
+
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded += this.OnProjectLoaded;
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded += this.OnProjectUnloaded;
 
             Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Initialized.");
         }
@@ -65,9 +84,12 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         public void Shutdown() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            _delayedFileChangeTimer.Stop();
+            _isShuttingDown = true;
+            this.ClearAnalysisState();
+
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded -= this.OnProjectUnloaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded -= this.OnProjectLoaded;
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Remove(this.OnSolutionClosed);
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Remove(this.OnSolutionLoaded);
 
             ClearInstance();
@@ -85,10 +107,6 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
         public IReadOnlyCollection<VsShell.Project.LoadedProject> GetTransitiveProjectsIncludersByIncludeString(string includeString) {
             var transitiveIncluders = this.GetTransitiveFilesIncludersByIncludeString(includeString);
-            if (transitiveIncluders == null) {
-                return null;
-            }
-
             return transitiveIncluders
                 .Select(sf => sf.LoadedProject)
                 .Distinct()
@@ -98,10 +116,6 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
         public IReadOnlyCollection<VsShell.Project.LoadedProject> GetTransitiveProjectsIncludersByIncludePath(string includePath) {
             var transitiveIncluders = this.GetTransitiveFilesIncludersByIncludePath(includePath);
-            if (transitiveIncluders == null) {
-                return null;
-            }
-
             return transitiveIncluders
                 .Select(sf => sf.LoadedProject)
                 .Distinct()
@@ -116,18 +130,21 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         /// Используется двухфазный алгоритм: сначала ищутся прямые попадания по <c>RawInclude</c>,
         /// затем выполняется транзитивный обход вверх по цепочке включений.
         ///
-        /// Если включён строгий режим, то кроме совпадения по имени, также сравнивается имя файла в <c>ResolvedPath</c>,
-        /// чтобы исключить ложные срабатывания при совпадении <c>RawInclude</c>, но разном физическом файле.
+        /// Поиск намеренно неточный: если в solution существуют <c>Game/Logger.h</c> и
+        /// <c>Helpers.Shared/Logger.h</c>, результат объединит зависимости обоих файлов.
+        /// Для поиска зависимостей конкретного физического файла используйте
+        /// <see cref="GetTransitiveFilesIncludersByIncludePath(string)"/>.
         /// </remarks>
         /// <param name="includeString">Имя include-файла (например, <c>"Logger.h"</c>).</param>
-        /// <param name="strictResolvedMatch">
-        /// Включает строгую фильтрацию: true — требует совпадения не только по <c>RawInclude</c>, но и по <c>ResolvedPath</c>.
-        /// </param>
         /// <returns>Список всех файлов, которые напрямую или транзитивно включают данный include.</returns>
-        public IReadOnlyList<Document.SourceFile> GetTransitiveFilesIncludersByIncludeString(string includeString, bool strictResolvedMatch = false) {
+        public IReadOnlyList<Document.SourceFile> GetTransitiveFilesIncludersByIncludeString(string includeString) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
             if (!this.IsReady()) {
-                return null;
+                return Array.Empty<Document.SourceFile>();
             }
+
+            this.RefreshEvaluationContextsIfNeeded();
 
             var result = new HashSet<Document.SourceFile>();
             var queue = new Queue<Document.SourceFile>();
@@ -145,29 +162,24 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                         continue;
                     }
 
-                    // ③ Строгий режим: фильтруем также по ResolvedPath → EndsWith("Logger.h")
-                    if (strictResolvedMatch && resolved.ResolvedPath is not null) {
-                        if (!Path.GetFileName(resolved.ResolvedPath).Equals(includeString, StringComparison.OrdinalIgnoreCase)) {
-                            continue;
-                        }
-                    }
-
-                    // ④ Получаем все SourceFile'ы, в которые реально резолвится include
+                    // ③ Добавляем непосредственного включателя вместе с его project context.
+                    // Например, Shared/X.h [Game] и Shared/X.h [Editor] — это разные узлы,
+                    // даже если у них один физический FilePath.
                     if (resolved.ResolvedPath is not null) {
-                        foreach (var includedFile in _solutionSourceFileGraph.GetSourceFilesByResolvedPath(resolved.ResolvedPath)) {
-                            if (result.Add(includedFile)) {
-                                queue.Enqueue(includedFile); // положим в очередь для обратного обхода
-                            }
+                        if (result.Add(sourceFile)) {
+                            queue.Enqueue(sourceFile);
                         }
                     }
                 }
             }
 
-            // ⑤ Обратный обход: кто включает те файлы, что мы уже нашли (транзитивно вверх)
+            // ④ Обратный обход: кто включает те файлы, что мы уже нашли (транзитивно вверх)
             while (queue.Count > 0) {
                 var current = queue.Dequeue();
 
-                foreach (var includer in _solutionSourceFileGraph.GetSourceFilesByResolvedPath(current.FilePath)) {
+                // Продолжаем подъём только в том project context, в котором была разрешена текущая ветка.
+                // Иначе Shared/X.h [Game] мог бы привести к Editor.cpp, включающему Shared/X.h [Editor].
+                foreach (var includer in _solutionSourceFileGraph.GetIncludersOfResolvedPath(current.FilePath, current.LoadedProject)) {
                     if (result.Add(includer)) {
                         queue.Enqueue(includer); // продолжаем подниматься вверх по графу
                     }
@@ -196,14 +208,26 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         /// <returns>
         /// Список <see cref="SourceFile"/>-файлов, которые напрямую или транзитивно включают указанный путь.
         /// </returns>
-        public IEnumerable<Document.SourceFile> GetTransitiveFilesIncludersByIncludePath(string includePath) {
+        public IReadOnlyList<Document.SourceFile> GetTransitiveFilesIncludersByIncludePath(string includePath) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
             if (!this.IsReady()) {
-                return null;
+                return Array.Empty<Document.SourceFile>();
             }
 
-            var directFiles = _solutionSourceFileGraph.GetSourceFilesByResolvedPath(includePath);
-            if (directFiles.Count() == 0) {
-                return Enumerable.Empty<Document.SourceFile>();
+            this.RefreshEvaluationContextsIfNeeded();
+
+            string normalizedIncludePath;
+            try {
+                normalizedIncludePath = Path.GetFullPath(includePath);
+            }
+            catch {
+                return Array.Empty<Document.SourceFile>();
+            }
+
+            var directFiles = _solutionSourceFileGraph.GetIncludersOfResolvedPath(normalizedIncludePath).ToList();
+            if (directFiles.Count == 0) {
+                return Array.Empty<Document.SourceFile>();
             }
 
             var result = new HashSet<Document.SourceFile>(directFiles);
@@ -212,23 +236,17 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             while (queue.Count > 0) {
                 var current = queue.Dequeue();
 
-                foreach (var kvp in _solutionSourceFileGraph.GetAllResolvedIncludeEntries()) {
-                    var source = kvp.Key;
-                    var includes = kvp.Value;
-
-                    foreach (var entry in includes) {
-                        if (entry.ResolvedPath != null &&
-                            StringComparer.OrdinalIgnoreCase.Equals(entry.ResolvedPath, current.FilePath)) {
-
-                            if (result.Add(source)) {
-                                queue.Enqueue(source);
-                            }
-                        }
+                // Начальные узлы собираются во всех проектах, но каждая дальнейшая ветка остаётся
+                // в своём контексте. Пример: Shared/X.h [Game] не переходит в Editor.cpp через
+                // физически тот же Shared/X.h [Editor].
+                foreach (var includer in _solutionSourceFileGraph.GetIncludersOfResolvedPath(current.FilePath, current.LoadedProject)) {
+                    if (result.Add(includer)) {
+                        queue.Enqueue(includer);
                     }
                 }
             }
 
-            return result;
+            return result.ToList();
         }
 
 
@@ -245,8 +263,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 var resolvedIncludes = _solutionSourceFileGraph.GetResolvedIncludes(sourceFile);
                 if (resolvedIncludes.Any()) {
                     foreach (var resolvedInclude in resolvedIncludes) {
-                        string normalized = resolvedInclude.IncludeEntry.RawInclude.Replace('\\', '/');
-                        Helpers.Diagnostic.Logger.LogDebug($"  └─ #include \"{normalized}\"");
+                        Helpers.Diagnostic.Logger.LogDebug($"  └─ #include {resolvedInclude.IncludeEntry}");
                     }
                 }
                 else {
@@ -262,16 +279,23 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private void OnSolutionLoaded(string solutionName) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnSolutionLoaded()");
 
-            if (solutionName == _lastLoadedSolutionName) {
+            if (solutionName == _lastLoadedSolutionName && _solutionSourceFileGraph != null) {
                 return;
             }
             _lastLoadedSolutionName = solutionName;
 
-            VsixThreadHelper.RunOnVsThread(() => {
-                //await Task.Run(() => {
-                    this.BuildSolutionGraph();
-                //});
-            });
+            VsixThreadHelper.RunOnVsThread(this.BuildSolutionGraphAsync);
+        }
+
+
+        private void OnSolutionClosed(string solutionName) {
+            using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnSolutionClosed()");
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Сбрасываем имя вместе с графом. Без этого повторное открытие того же .sln считалось
+            // дубликатом SolutionLoaded и оставляло SourceFile со ссылками на уже disposed-проекты.
+            _lastLoadedSolutionName = null;
+            this.ClearAnalysisState();
         }
 
 
@@ -290,6 +314,12 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             var loadedProject = solutionHierarchyAnalyzer.LoadedProjects
                 .FirstOrDefault(p => p.ProjectGuid == projectGuid);
 
+            if (loadedProject == null) {
+                Helpers.Diagnostic.Logger.LogWarning($"Skip project graph update: project '{projectGuid}' is absent from the solution hierarchy analyzer.");
+                return;
+            }
+
+            _msBuildSolutionWatcher?.AddOrUpdateProject(loadedProject.ShellProject.dteProject);
             this.UpdateProjectGraph(loadedProject);
         }
 
@@ -309,24 +339,78 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 .Where(sf => sf.LoadedProject.ProjectGuid == projectGuid)
                 .ToList();
 
+            string? projectPath = filesToRemove.FirstOrDefault()?.LoadedProject.FullName;
+            if (string.IsNullOrEmpty(projectPath)) {
+                projectPath = Utils.EnvDteUtils.GetDteProjectFromHierarchy(projectRealHierarchy.VsRealHierarchy)?.FullName;
+            }
+
             foreach (var sf in filesToRemove) {
                 _solutionSourceFileGraph.RemoveSourceFile(sf);
+            }
+
+            if (!string.IsNullOrEmpty(projectPath)) {
+                _msBuildSolutionWatcher?.RemoveProject(projectPath!);
             }
         }
 
 
+        private void OnMsBuildIncludeEnvironmentChanged(string projectPath) {
+            if (_isShuttingDown || Interlocked.CompareExchange(ref _msBuildRefreshQueued, 1, 0) != 0) {
+                return;
+            }
+
+            _delayedFileChangeTimer.Dispatcher.BeginInvoke(
+                new Action(
+                    () => {
+                        Interlocked.Exchange(ref _msBuildRefreshQueued, 0);
+                        if (_isShuttingDown || _solutionSourceFileGraph == null) {
+                            return;
+                        }
+
+                        // Перечитываем все проекты: изменение PublicIncludeDirectories в одном
+                        // referenced-проекте способно изменить разрешение include у его потребителей.
+                        this.RefreshAllProjectGraphs();
+                    }
+                ),
+                DispatcherPriority.Background
+            );
+        }
+
+
         private void OnSolutionDirectoryChanged(Helpers.DirectoryChangedEventArgs e) {
+            if (_isShuttingDown) {
+                return;
+            }
+
             lock (_pendingChangedFiles) {
                 _pendingChangedFiles.Add(e);
             }
 
-            _delayedFileChangeTimer.Stop();
-            _delayedFileChangeTimer.Start();
+            // Событие об изменении файла приходит из фонового потока. DispatcherTimer можно безопасно
+            // запускать только в UI-потоке, в котором он был создан. BeginInvoke передаёт перезапуск
+            // таймера в очередь UI-потока; без этого два потока могли одновременно менять его состояние.
+            _delayedFileChangeTimer.Dispatcher.BeginInvoke(
+                new Action(
+                    () => {
+                        if (_isShuttingDown) {
+                            return;
+                        }
+
+                        _delayedFileChangeTimer.Stop();
+                        _delayedFileChangeTimer.Start();
+                    }
+                ),
+                DispatcherPriority.Background
+            );
         }
 
 
         private void OnDelayedFileChangeTimerTick() {
             _delayedFileChangeTimer.Stop();
+
+            if (_isShuttingDown) {
+                return;
+            }
 
             List<Helpers.DirectoryChangedEventArgs> changedFiles;
             lock (_pendingChangedFiles) {
@@ -334,10 +418,22 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 _pendingChangedFiles.Clear();
             }
 
-            this.ProcessChangedVcxProjects(ref changedFiles);
+            try {
+                this.ProcessChangedProjectInputs(ref changedFiles);
 
-            foreach (var changedFile in changedFiles) {
-                this.ProcessChangedFile(changedFile);
+                bool includeResolutionInvalidated = false;
+                foreach (var changedFile in changedFiles) {
+                    includeResolutionInvalidated |= this.ProcessChangedFile(changedFile);
+                }
+
+                if (includeResolutionInvalidated) {
+                    this.ReresolveAllSourceFiles();
+                }
+            }
+            catch (Exception ex) {
+                // FileSystemWatcher сообщает о промежуточных состояниях atomic save. Ошибка чтения
+                // временно заблокированного файла не должна падать из UI DispatcherTimer.
+                Helpers.Diagnostic.Logger.LogError($"[IncludeDependencyAnalyzerService] Failed to process file changes: {ex}");
             }
         }
 
@@ -349,33 +445,52 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         /// <summary>
         /// Depends on SolutionHierarchyAnalyzerService.
         /// </summary>
-        private void BuildSolutionGraph() {
+        private async Task BuildSolutionGraphAsync() {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("BuildSolutionGraph()");
-            ThreadHelper.ThrowIfNotOnUIThread();
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            this.ClearAnalysisState();
+            _buildingSolutionGraphInProcess = true;
+            var cancellation = new CancellationTokenSource();
+            _graphBuildCancellation = cancellation;
+            CancellationToken cancellationToken = cancellation.Token;
+            MsBuildSolutionWatcher? unpublishedWatcher = null;
 
             try {
-                //Console.Beep(3000, 500);
-                _buildingSolutionGraphInProcess = true;
-
-                _msBuildSolutionWatcher?.Dispose();
-                _solutionDirWatcher?.Dispose();
-
-
                 var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
-                var loadedProjectNodes = solutionHierarchyAnalyzer.LoadedProjects;
-                //.Where(pn => EnvDteUtils.IsCppProject(pn.dteProject))
-                //.ToList();
+                var loadedProjectNodes = solutionHierarchyAnalyzer.LoadedProjects
+                    .Where(this.IsCppProjectNode)
+                    .ToList();
 
                 var dteProjects = loadedProjectNodes
                     .Select(pn => pn.ShellProject.dteProject)
                     .ToList();
 
-                _msBuildSolutionWatcher = new MsBuildSolutionWatcher(dteProjects);
-                _solutionSourceFileGraph = new SolutionSourceFileGraph(_msBuildSolutionWatcher);
+                var projectEvaluationInputs = MsBuildSolutionWatcher.CaptureProjectEvaluationInputs(dteProjects);
 
-                foreach (var loadedProjectNode in loadedProjectNodes) {
-                    this.UpdateProjectGraph(loadedProjectNode);
-                }
+                var snapshotWatch = Stopwatch.StartNew();
+                var projectSnapshots = await this.CreateProjectSnapshotsAsync(loadedProjectNodes, cancellationToken);
+                snapshotWatch.Stop();
+
+                var graphWatch = Stopwatch.StartNew();
+                var buildResult = await Task.Run(
+                    () => {
+                        var watcher = new MsBuildSolutionWatcher(projectEvaluationInputs);
+                        unpublishedWatcher = watcher;
+                        var newGraph = this.BuildGraphFromSnapshots(projectSnapshots, watcher, cancellationToken);
+                        return (Watcher: watcher, Graph: newGraph);
+                    },
+                    cancellationToken
+                );
+
+                graphWatch.Stop();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                buildResult.Watcher.AttachDteProjects(projectEvaluationInputs);
+                buildResult.Watcher.IncludeEnvironmentChanged += this.OnMsBuildIncludeEnvironmentChanged;
+                _msBuildSolutionWatcher = buildResult.Watcher;
+                _solutionSourceFileGraph = buildResult.Graph;
+                unpublishedWatcher = null;
 
                 string? solutionDir = Path.GetDirectoryName(PackageServices.Dte2.Solution.FullName);
                 if (solutionDir != null && Directory.Exists(solutionDir)) {
@@ -383,16 +498,101 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     _solutionDirWatcher.DirectoryChanged += this.OnSolutionDirectoryChanged;
                 }
 
-#if DEBUG
-                Console.Beep(1500, 500);
-#endif
-                _buildingSolutionGraphInProcess = false;
+                int sourceFileCount = projectSnapshots.Sum(snapshot => snapshot.FilePaths.Count);
+                Helpers.Diagnostic.Logger.LogDebug(
+                    $"[IncludeDependencyAnalyzerService] Graph ready: projects={projectSnapshots.Count}, " +
+                    $"source representations={sourceFileCount}, snapshot={snapshotWatch.ElapsedMilliseconds} ms, " +
+                    $"background build={graphWatch.ElapsedMilliseconds} ms."
+                );
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
+                unpublishedWatcher?.Dispose();
+                Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Background graph build canceled.");
             }
             catch (Exception ex) {
+                unpublishedWatcher?.Dispose();
                 Helpers.Diagnostic.Logger.LogError($"[BuildSolutionGraph] exception: {ex}");
-                System.Diagnostics.Debugger.Break();
-                throw;
+                this.ClearAnalysisState();
+                _lastLoadedSolutionName = null;
             }
+            finally {
+                if (ReferenceEquals(_graphBuildCancellation, cancellation)) {
+                    _graphBuildCancellation.Dispose();
+                    _graphBuildCancellation = null;
+                    _buildingSolutionGraphInProcess = false;
+                }
+            }
+        }
+
+        private async Task<List<ProjectFilesSnapshot>> CreateProjectSnapshotsAsync(
+            IReadOnlyList<VsShell.Project.LoadedProject> loadedProjects,
+            CancellationToken cancellationToken) {
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            var result = new List<ProjectFilesSnapshot>(loadedProjects.Count);
+
+            foreach (var loadedProject in loadedProjects) {
+                cancellationToken.ThrowIfCancellationRequested();
+                var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var stack = new Stack<EnvDTE.ProjectItem>();
+
+                foreach (EnvDTE.ProjectItem item in loadedProject.ShellProject.dteProject.ProjectItems) {
+                    stack.Push(item);
+                }
+
+                int processedItems = 0;
+                while (stack.Count > 0) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var current = stack.Pop();
+
+                    try {
+                        if (current.FileCount > 0) {
+                            string filePath = current.FileNames[1];
+                            if (this.IsCppSourcePath(filePath) && File.Exists(filePath)) {
+                                filePaths.Add(filePath);
+                            }
+                        }
+
+                        if (current.ProjectItems != null) {
+                            foreach (EnvDTE.ProjectItem child in current.ProjectItems) {
+                                stack.Push(child);
+                            }
+                        }
+                    }
+                    catch (Exception ex) {
+                        Helpers.Diagnostic.Logger.LogWarning($"[IncludeDependencyAnalyzerService] Skip unavailable project item: {ex.Message}");
+                    }
+
+                    processedItems++;
+                    if (processedItems % 200 == 0) {
+                        await Task.Yield();
+                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+                    }
+                }
+
+                result.Add(new ProjectFilesSnapshot(loadedProject, filePaths.ToList()));
+                await Task.Yield();
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            }
+
+            return result;
+        }
+
+        private SolutionSourceFileGraph BuildGraphFromSnapshots(
+            IReadOnlyList<ProjectFilesSnapshot> projectSnapshots,
+            MsBuildSolutionWatcher msBuildSolutionWatcher,
+            CancellationToken cancellationToken) {
+
+            var graph = new SolutionSourceFileGraph(msBuildSolutionWatcher);
+            foreach (var projectSnapshot in projectSnapshots) {
+                foreach (string filePath in projectSnapshot.FilePaths) {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var sourceFile = new Document.SourceFile(filePath, projectSnapshot.LoadedProject);
+                    graph.AddSourceFileWithIncludes(sourceFile, this.ExtractRawIncludes(filePath));
+                }
+            }
+
+            return graph;
         }
 
 
@@ -400,225 +600,335 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("UpdateProjectGraph()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            Helpers.Diagnostic.Logger.LogParam($"project name = [{loadedProject.UniqueName}]");
+            if (_solutionSourceFileGraph == null || !this.IsCppProjectNode(loadedProject)) {
+                return;
+            }
 
+            _buildingProjectGraphInProcess = true;
+
+            try {
+                var discoveredProjectFiles = new HashSet<Document.SourceFile>();
+                var stack = new Stack<EnvDTE.ProjectItem>();
+                int skippedFileCount = 0;
+
+                foreach (EnvDTE.ProjectItem item in loadedProject.ShellProject.dteProject.ProjectItems) {
+                    stack.Push(item);
+                }
+
+                while (stack.Count > 0) {
+                    var current = stack.Pop();
+
+                    if (current.FileCount > 0) {
+                        string filePath = current.FileNames[1];
+                        string ext = Path.GetExtension(filePath);
+
+                        bool isCppProjectFile = _supportedCppExtensions.Contains(ext);
+
+                        if (isCppProjectFile) {
+                            var newSourceFile = new Document.SourceFile(filePath, loadedProject);
+                            var newIncludeEntries = this.ExtractRawIncludes(filePath);
+                            discoveredProjectFiles.Add(newSourceFile);
+
+                            if (_solutionSourceFileGraph.TryGetSourceFileRepresentations(filePath, out var candidates) &&
+                                candidates.Any(sf => sf.LoadedProject.ProjectGuid == loadedProject.ProjectGuid)) {
+
+                                _solutionSourceFileGraph.UpdateSourceFileWithIncludes(newSourceFile, newIncludeEntries);
+                            }
+                            else {
+                                _solutionSourceFileGraph.AddSourceFileWithIncludes(newSourceFile, newIncludeEntries);
+                            }
+                        }
+                        else {
+                            skippedFileCount++;
+                        }
+                    }
+
+                    // Всегда обходим вложенные элементы, даже если это была папка или файл без .h/.cpp
+                    if (current.ProjectItems != null) {
+                        foreach (EnvDTE.ProjectItem child in current.ProjectItems) {
+                            stack.Push(child);
+                        }
+                    }
+                }
+
+                // UpdateProjectGraph должен быть синхронизацией, а не только add/update.
+                // Например, если Old.cpp удалили из проекта, но оставили на диске, DTE больше не
+                // обнаружит его, поэтому старое представление необходимо явно убрать из графа.
+                var staleProjectFiles = _solutionSourceFileGraph.GetSourceFilesForProject(loadedProject.ProjectGuid)
+                    .Where(sourceFile => !discoveredProjectFiles.Contains(sourceFile))
+                    .ToList();
+
+                foreach (var staleProjectFile in staleProjectFiles) {
+                    _solutionSourceFileGraph.RemoveSourceFile(staleProjectFile);
+                }
+
+                Helpers.Diagnostic.Logger.LogDebug(
+                    $"[IncludeDependencyAnalyzerService] Project graph synchronized: '{loadedProject.UniqueName}', " +
+                    $"C/C++ files={discoveredProjectFiles.Count}, skipped items={skippedFileCount}, removed={staleProjectFiles.Count}."
+                );
+            }
+            finally {
+                _buildingProjectGraphInProcess = false;
+            }
+        }
+
+
+        private List<Document.IncludeEntry> ExtractRawIncludes(string filePath) {
+            var fileInfo = new FileInfo(filePath);
+            long lastWriteTimeUtcTicks = fileInfo.LastWriteTimeUtc.Ticks;
+            long length = fileInfo.Length;
+
+            lock (_includeParseCacheLock) {
+                if (_includeParseCache.TryGetValue(filePath, out var cached) &&
+                    cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks &&
+                    cached.Length == length) {
+
+                    return cached.IncludeEntries;
+                }
+            }
+
+            // Один физический shared-файл может иметь представления в нескольких проектах.
+            // Текст парсим один раз, а разрешение include всё равно выполняется в каждом project context.
+            var includeEntries = CppIncludeParser.ParseFile(filePath);
+            lock (_includeParseCacheLock) {
+                _includeParseCache[filePath] = new IncludeParseCacheEntry(lastWriteTimeUtcTicks, length, includeEntries);
+            }
+
+            return includeEntries;
+        }
+
+
+        private void ProcessChangedProjectInputs(ref List<Helpers.DirectoryChangedEventArgs> changedFiles) {
+            var changedProjectInputs = changedFiles
+                .Where(changedFile => this.IsProjectInputPath(changedFile.FullPath))
+                .ToList();
+
+            if (changedProjectInputs.Count == 0) {
+                return;
+            }
+
+            changedFiles.RemoveAll(changedProjectInputs.Contains);
+
+            // .vcxitems и импортированные .props/.targets могут влиять сразу на несколько проектов.
+            // Например, Helpers.Shared.vcxitems импортируется Game, Editor и Engine, поэтому обновления
+            // только проекта с именем Helpers.Shared недостаточно — пересчитываем все loaded contexts.
+            this.RefreshAllProjectGraphs();
+        }
+
+
+        private bool ProcessChangedFile(Helpers.DirectoryChangedEventArgs changedFile) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            bool isCurrentPathSupported = this.IsCppSourcePath(changedFile.FullPath);
+            bool isOldPathSupported = changedFile.OldPath != null && this.IsCppSourcePath(changedFile.OldPath);
+            if (!isCurrentPathSupported && !isOldPathSupported) {
+                return false;
+            }
+
+            bool resolutionInvalidated = changedFile.ChangeType != Helpers.DirectoryChangeType.Changed;
+
+            if (isOldPathSupported && changedFile.ChangeType == Helpers.DirectoryChangeType.Renamed) {
+                this.RemoveSourceFileRepresentations(changedFile.OldPath!);
+            }
+
+            if (!isCurrentPathSupported) {
+                return resolutionInvalidated;
+            }
+
+            if (!File.Exists(changedFile.FullPath)) {
+                this.RemoveSourceFileRepresentations(changedFile.FullPath);
+                return resolutionInvalidated;
+            }
+
+            if (changedFile.ChangeType == Helpers.DirectoryChangeType.Changed &&
+                _solutionSourceFileGraph.TryGetSourceFileRepresentations(changedFile.FullPath, out var candidates) &&
+                candidates.Count > 0) {
+
+                this.UpdateIncludesIfNeeded(changedFile.FullPath, candidates);
+            }
+            else {
+                this.SynchronizeSourceFileRepresentations(changedFile.FullPath);
+            }
+
+            return resolutionInvalidated;
+        }
+
+
+        private void SynchronizeSourceFileRepresentations(string filePath) {
+            var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
+            var ownerProjects = solutionHierarchyAnalyzer.LoadedProjects
+                .Where(loadedProject => Utils.EnvDteUtils.IsFileInProject(filePath, loadedProject.ShellProject.dteProject))
+                .ToList();
+
+            _solutionSourceFileGraph.TryGetSourceFileRepresentations(filePath, out var existingRepresentations);
+            var ownerProjectGuids = ownerProjects
+                .Select(project => project.ProjectGuid)
+                .ToHashSet();
+
+            foreach (var staleRepresentation in existingRepresentations.Where(sourceFile => !ownerProjectGuids.Contains(sourceFile.LoadedProject.ProjectGuid)).ToList()) {
+                _solutionSourceFileGraph.RemoveSourceFile(staleRepresentation);
+            }
+
+            if (ownerProjects.Count == 0) {
+                return;
+            }
+
+            var newIncludes = this.ExtractRawIncludes(filePath);
+            foreach (var ownerProject in ownerProjects) {
+                var sourceFile = new Document.SourceFile(filePath, ownerProject);
+                if (existingRepresentations.Any(existing => existing.LoadedProject.ProjectGuid == ownerProject.ProjectGuid)) {
+                    _solutionSourceFileGraph.UpdateSourceFileWithIncludes(sourceFile, newIncludes);
+                }
+                else {
+                    _solutionSourceFileGraph.AddSourceFileWithIncludes(sourceFile, newIncludes);
+                }
+
+                Helpers.Diagnostic.Logger.LogDebug($"[synchronized] {filePath} [{ownerProject.UniqueName}] → graph updated by fswatcher");
+            }
+        }
+
+
+        private void RemoveSourceFileRepresentations(string filePath) {
+            if (!_solutionSourceFileGraph.TryGetSourceFileRepresentations(filePath, out var candidates)) {
+                return;
+            }
+
+            foreach (var sourceFile in candidates.ToList()) {
+                _solutionSourceFileGraph.RemoveSourceFile(sourceFile);
+                Helpers.Diagnostic.Logger.LogDebug($"[removed] {filePath} [{sourceFile.LoadedProject.UniqueName}] → removed from graph");
+            }
+        }
+
+
+        private void RefreshAllProjectGraphs() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_solutionSourceFileGraph == null || _msBuildSolutionWatcher == null) {
+                return;
+            }
+
+            var loadedProjects = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.LoadedProjects.ToList();
+            _msBuildSolutionWatcher.SynchronizeProjects(loadedProjects.Select(project => project.ShellProject.dteProject));
+
+            foreach (var loadedProject in loadedProjects) {
+                this.UpdateProjectGraph(loadedProject);
+            }
+        }
+
+
+        private void ReresolveAllSourceFiles() {
             if (_solutionSourceFileGraph == null) {
                 return;
             }
-            //Console.Beep(1000, 500);
-            _buildingProjectGraphInProcess = true;
 
-            var stack = new Stack<EnvDTE.ProjectItem>();
+            // Создание, удаление или rename target-файла меняет результат разрешения include даже
+            // тогда, когда текст включателя не изменился. Например, после появления Missing.h запись
+            // "Missing.h → null" должна стать "Missing.h → C:/Project/Missing.h".
+            var sourceFilesWithRawIncludes = _solutionSourceFileGraph.AllSourceFiles
+                .Select(
+                    sourceFile => (
+                        SourceFile: sourceFile,
+                        RawIncludes: _solutionSourceFileGraph.GetRawIncludes(sourceFile).ToList()
+                    )
+                )
+                .ToList();
 
-            foreach (EnvDTE.ProjectItem item in loadedProject.ShellProject.dteProject.ProjectItems) {
-                stack.Push(item);
+            foreach (var sourceFileWithIncludes in sourceFilesWithRawIncludes) {
+                _solutionSourceFileGraph.UpdateSourceFileWithIncludes(
+                    sourceFileWithIncludes.SourceFile,
+                    sourceFileWithIncludes.RawIncludes
+                );
+            }
+        }
+
+
+        private void RefreshEvaluationContextsIfNeeded() {
+            if (_msBuildSolutionWatcher != null && _msBuildSolutionWatcher.RefreshEvaluationContexts()) {
+                // Переключение Debug|x64 → Release|x64 не меняет текст исходников, но может
+                // полностью изменить AdditionalIncludeDirectories. Перед запросом обновляем edges,
+                // чтобы результат соответствовал активной конфигурации Visual Studio.
+                this.ReresolveAllSourceFiles();
+            }
+        }
+
+
+        private bool IsCppSourcePath(string filePath) {
+            return _supportedCppExtensions.Contains(Path.GetExtension(filePath));
+        }
+
+        private bool IsCppProjectNode(VsShell.Project.LoadedProject loadedProject) {
+            string extension = Path.GetExtension(loadedProject.UniqueName);
+            return string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".vcxitems", StringComparison.OrdinalIgnoreCase);
+        }
+
+
+        private bool IsProjectInputPath(string filePath) {
+            string extension = Path.GetExtension(filePath);
+            return string.Equals(extension, ".vcxproj", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".vcxitems", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".filters", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase);
+        }
+
+
+        private void ClearAnalysisState() {
+            _delayedFileChangeTimer?.Stop();
+            _graphBuildCancellation?.Cancel();
+
+            // DirectoryWatcher и MSBuild watcher работают в фоновых потоках. Сначала отписываемся,
+            // затем освобождаем ресурсы, чтобы закрытый solution не поставил новую UI-задачу в очередь.
+            if (_solutionDirWatcher != null) {
+                _solutionDirWatcher.DirectoryChanged -= this.OnSolutionDirectoryChanged;
+                _solutionDirWatcher.Dispose();
+                _solutionDirWatcher = null;
             }
 
-            while (stack.Count > 0) {
-                var current = stack.Pop();
-
-                if (current.FileCount > 0 && current.FileCodeModel is VCFileCodeModel) {
-                    string filePath = current.FileNames[1];
-                    string ext = Path.GetExtension(filePath);
-
-                    bool isCppProjectFile =
-                        string.Equals(ext, ".h", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(ext, ".hpp", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(ext, ".cpp", StringComparison.OrdinalIgnoreCase);
-
-                    if (isCppProjectFile) {
-                        var newSourceFile = new Document.SourceFile(filePath, loadedProject);
-                        var newIncludeEntries = this.ExtractRawIncludes(filePath);
-
-                        if (_solutionSourceFileGraph.TryGetSourceFileRepresentations(filePath, out var candidates) &&
-                            candidates.Any(sf => StringComparer.OrdinalIgnoreCase.Equals(sf.LoadedProject.UniqueName, newSourceFile.LoadedProject.UniqueName))) {
-
-                            _solutionSourceFileGraph.UpdateSourceFileWithIncludes(newSourceFile, newIncludeEntries);
-                            Helpers.Diagnostic.Logger.LogDebug($"updated sourceFile: {filePath} [{loadedProject.UniqueName}]");
-                        }
-                        else {
-                            _solutionSourceFileGraph.AddSourceFileWithIncludes(newSourceFile, newIncludeEntries);
-                            Helpers.Diagnostic.Logger.LogDebug($"added sourceFile: {filePath} [{loadedProject.UniqueName}]");
-                        }
-                    }
-                    else {
-                        Helpers.Diagnostic.Logger.LogDebug($"non cpp file: {filePath} [{loadedProject.UniqueName}]");
-                    }
-                }
-
-                // Всегда обходим вложенные элементы, даже если это была папка или файл без .h/.cpp
-                if (current.ProjectItems != null) {
-                    foreach (EnvDTE.ProjectItem child in current.ProjectItems) {
-                        stack.Push(child);
-                    }
-                }
+            if (_msBuildSolutionWatcher != null) {
+                _msBuildSolutionWatcher.IncludeEnvironmentChanged -= this.OnMsBuildIncludeEnvironmentChanged;
+                _msBuildSolutionWatcher.Dispose();
+                _msBuildSolutionWatcher = null!;
             }
 
-            //Console.Beep(700, 500);
+            _solutionSourceFileGraph?.Clear();
+            _solutionSourceFileGraph = null!;
+            Interlocked.Exchange(ref _msBuildRefreshQueued, 0);
             _buildingProjectGraphInProcess = false;
-        }
 
-
-        private List<Document.IncludeEntry> ExtractRawIncludes(string filePath, int maxLinesToRead = 10) {
-            var resultIncludeEntries = new List<Document.IncludeEntry>();
-
-            using var reader = new StreamReader(filePath);
-            int lineCount = 0;
-
-            while (!reader.EndOfStream && lineCount < maxLinesToRead) {
-                string? line = reader.ReadLine();
-                if (line == null) {
-                    break;
-                }
-
-                lineCount++;
-                string trimmed = line.TrimStart();
-                if (!trimmed.StartsWith("#include")) {
-                    continue;
-                }
-
-                int start = trimmed.IndexOfAny(new[] { '"', '<' });
-                int end = trimmed.LastIndexOfAny(new[] { '"', '>' });
-
-                if (start >= 0 && end > start) {
-                    string rawInclude = trimmed.Substring(start + 1, end - start - 1).Trim();
-                    if (!string.IsNullOrWhiteSpace(rawInclude)) {
-                        resultIncludeEntries.Add(new Document.IncludeEntry(rawInclude));
-                    }
-                }
-            }
-
-            return resultIncludeEntries;
-        }
-
-
-        private void ProcessChangedVcxProjects(ref List<Helpers.DirectoryChangedEventArgs> changedFiles) {
-            var changedVcxProjects = new List<Helpers.DirectoryChangedEventArgs>();
-
-            foreach (var changedFile in changedFiles) {
-                var ext = Path.GetExtension(changedFile.FullPath);
-                switch (ext) {
-                    case ".vcxproj":
-                    case ".filters":
-                    case ".vcxitems":
-                        changedVcxProjects.Add(changedFile);
-                        break;
-                }
-            }
-
-            if (changedVcxProjects.Count == 0) {
-                return;
-            }
-
-            changedFiles.RemoveAll(changedVcxProjects.Contains);
-
-            // Game.vcxproj
-            // Game.vcxproj.filters
-            // Helpers.Shared.vcxitems.filters
-            //          
-            //          |
-            //          V
-            //
-            // Game
-            // Helpers.Shared
-
-            var changedUniqueVcxProjectNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var changedVcxProject in changedVcxProjects) {
-                string fileName = Path.GetFileName(changedVcxProject.FullPath);
-
-                string projectName = fileName;
-                if (projectName.EndsWith(".filters", StringComparison.OrdinalIgnoreCase)) {
-                    projectName = Path.GetFileNameWithoutExtension(projectName); // уберём .filters
-                }
-
-                projectName = Path.GetFileNameWithoutExtension(projectName); // уберём .vcxproj или .vcxitems
-                changedUniqueVcxProjectNames.Add(projectName);
-            }
-
-            var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
-            foreach (var loadedProject in solutionHierarchyAnalyzer.LoadedProjects) {
-                foreach (var changedProjectName in changedUniqueVcxProjectNames) {
-                    if (StringComparer.OrdinalIgnoreCase.Equals(changedProjectName, loadedProject.Name)) {
-                        this.UpdateProjectGraph(loadedProject);
-                    }
-                }
+            lock (_pendingChangedFiles) {
+                _pendingChangedFiles.Clear();
             }
         }
 
+        private sealed class ProjectFilesSnapshot {
+            public VsShell.Project.LoadedProject LoadedProject { get; }
+            public IReadOnlyList<string> FilePaths { get; }
 
-        private void ProcessChangedFile(Helpers.DirectoryChangedEventArgs changedFile) {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            var ext = Path.GetExtension(changedFile.FullPath);
-            switch (ext) {
-                case ".h":
-                case ".hpp":
-                case ".cpp":
-                    break;
-
-                default:
-                    return;
+            public ProjectFilesSnapshot(VsShell.Project.LoadedProject loadedProject, IReadOnlyList<string> filePaths) {
+                this.LoadedProject = loadedProject;
+                this.FilePaths = filePaths;
             }
+        }
 
-            switch (changedFile.ChangeType) {
-                case Helpers.DirectoryChangeType.Changed: {
-                        if (!File.Exists(changedFile.FullPath)) {
-                            return;
-                        }
+        private sealed class IncludeParseCacheEntry {
+            public long LastWriteTimeUtcTicks { get; }
+            public long Length { get; }
+            public List<Document.IncludeEntry> IncludeEntries { get; }
 
-                        if (_solutionSourceFileGraph.TryGetSourceFileRepresentations(changedFile.FullPath, out var candidates) && candidates.Count > 0) {
-                            this.UpdateIncludesIfNeeded(changedFile.FullPath, candidates);
-                        }
-                    }
-                    break;
-
-                case Helpers.DirectoryChangeType.Created:
-                case Helpers.DirectoryChangeType.Renamed: {
-                        if (!File.Exists(changedFile.FullPath)) {
-                            return;
-                        }
-
-                        if (_solutionSourceFileGraph.TryGetSourceFileRepresentations(changedFile.FullPath, out var candidates) && candidates.Count > 0) {
-                            this.UpdateIncludesIfNeeded(changedFile.FullPath, candidates);
-                            return;
-                        }
-
-                        // ⛔ Файл не найден в графе — ищем в проектах, возможно git checkout вернул файл
-                        var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
-                        foreach (var loadedProject in solutionHierarchyAnalyzer.LoadedProjects) {
-                            if (Utils.EnvDteUtils.IsFileInProject(changedFile.FullPath, loadedProject.ShellProject.dteProject)) {
-                                var newIncludes = this.ExtractRawIncludes(changedFile.FullPath);
-                                var newSourceFile = new Document.SourceFile(changedFile.FullPath, loadedProject);
-
-                                _solutionSourceFileGraph.AddSourceFileWithIncludes(newSourceFile, newIncludes);
-                                Helpers.Diagnostic.Logger.LogDebug($"[auto re-added] {changedFile.FullPath} → found in {loadedProject.UniqueName}, graph updated by fswatcher");
-                                break;
-                            }
-                        }
-                    }
-                    break;
-
-                case Helpers.DirectoryChangeType.Deleted: {
-                        if (!_solutionSourceFileGraph.TryGetSourceFileRepresentations(changedFile.FullPath, out var candidates)) {
-                            return;
-                        }
-
-                        foreach (var sourceFile in candidates) {
-                            _solutionSourceFileGraph.RemoveSourceFile(sourceFile);
-                            Helpers.Diagnostic.Logger.LogDebug($"[deleted] {changedFile.FullPath} [{sourceFile.LoadedProject.UniqueName}] → removed from graph");
-                        }
-                    }
-                    break;
+            public IncludeParseCacheEntry(long lastWriteTimeUtcTicks, long length, List<Document.IncludeEntry> includeEntries) {
+                this.LastWriteTimeUtcTicks = lastWriteTimeUtcTicks;
+                this.Length = length;
+                this.IncludeEntries = includeEntries;
             }
         }
 
 
         private void UpdateIncludesIfNeeded(string filePath, IReadOnlyList<Document.SourceFile> candidates) {
             var updated = new List<(Document.SourceFile OldFile, List<Document.IncludeEntry> NewIncludes)>();
+            var newIncludeEntries = this.ExtractRawIncludes(filePath);
 
             foreach (var oldFile in candidates) {
-                var newIncludeEntries = this.ExtractRawIncludes(filePath);
                 var oldIncludeEntries = _solutionSourceFileGraph.GetResolvedIncludes(oldFile)
                     .Select(resolvedInclude => resolvedInclude.IncludeEntry)
                     .ToList();
@@ -631,9 +941,9 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 }
             }
 
-            foreach (var (oldFile, newIncludeEntries) in updated) {
+            foreach (var (oldFile, changedIncludeEntries) in updated) {
                 var updatedFile = new Document.SourceFile(filePath, oldFile.LoadedProject);
-                _solutionSourceFileGraph.UpdateSourceFileWithIncludes(updatedFile, newIncludeEntries);
+                _solutionSourceFileGraph.UpdateSourceFileWithIncludes(updatedFile, changedIncludeEntries);
                 Helpers.Diagnostic.Logger.LogDebug($"[include changed] {filePath} [{oldFile.LoadedProject.UniqueName}] → includes updated");
             }
         }

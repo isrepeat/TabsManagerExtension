@@ -60,8 +60,6 @@
             <DataTemplate x:Key="CloseButton_PrimarySlotTemplate">
                 <Button Style="{StaticResource TabItemControlPanelButtonStyle}"
                         Content="✖"
-                        MouseEnter="InteractiveArea_MouseEnter"
-                        MouseLeave="InteractiveArea_MouseLeave"
                         Command="{Binding OnCloseTabItemCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
                         CommandParameter="{Binding}"
                         />
@@ -138,11 +136,13 @@
                 <MenuItem Header="{Binding}"
                           Command="{Binding Command}"
                           CommandParameter="{Binding CommandParameterContext}"
+                          MouseEnter="ProjectContextMenuItem_MouseEnter"
                           >
                     <MenuItem.HeaderTemplate>
                         <DataTemplate>
-                            <Grid>
+                            <Grid MinWidth="160">
                                 <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="auto"/>
                                     <ColumnDefinition Width="auto"/>
                                 </Grid.ColumnDefinitions>
@@ -162,6 +162,19 @@
                                            Text=" ..."
                                            Visibility="Collapsed"
                                            />
+
+                                <Button Grid.Column="2"
+                                        Margin="8,-3,-5,-3"
+                                        Padding="6,3"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=MenuItem}}"
+                                        FontFamily="Segoe MDL2 Assets"
+                                        Content="&#xE76C;"
+                                        ToolTip="Show transitive including files"
+                                        IsEnabled="{Binding CommandParameterContext.ProjectEntry.IsLoaded}"
+                                        Click="ProjectContextIncludersButton_Click"
+                                        />
                             </Grid>
                             <DataTemplate.Triggers>
                                 <MultiDataTrigger>
@@ -179,6 +192,50 @@
                                     <Setter TargetName="_DisabledSuffix" Property="Visibility" Value="Visible"/>
                                 </MultiDataTrigger>
                             </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </MenuItem.HeaderTemplate>
+                </MenuItem>
+            </DataTemplate>
+
+
+
+            <DataTemplate x:Key="DocumentProjectGroupContextCommandTemplate">
+                <MenuItem Header="{Binding Header}"
+                          Command="{Binding Command}"
+                          CommandParameter="{Binding CommandParameterContext}"
+                          MouseEnter="ProjectContextMenuItem_MouseEnter">
+                    <MenuItem.Style>
+                        <Style TargetType="MenuItem" BasedOn="{StaticResource MenuControl/MenuItemCommandStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CommandParameterContext.CanSwitch}" Value="False">
+                                    <Setter Property="Foreground" Value="#70DDDDDD"/>
+                                    <Setter Property="IsEnabled" Value="False"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </MenuItem.Style>
+                    <MenuItem.HeaderTemplate>
+                        <DataTemplate>
+                            <Grid MinWidth="160">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock Text="{Binding Header}"/>
+                                <Button Grid.Column="1"
+                                        Margin="8,-3,-5,-3"
+                                        Padding="6,3"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=MenuItem}}"
+                                        FontFamily="Segoe MDL2 Assets"
+                                        Content="&#xE76C;"
+                                        ToolTip="Show transitive including files"
+                                        IsEnabled="{Binding CommandParameterContext.CanSwitch}"
+                                        Click="ProjectContextIncludersButton_Click"
+                                        />
+                            </Grid>
                         </DataTemplate>
                     </MenuItem.HeaderTemplate>
                 </MenuItem>
@@ -217,6 +274,7 @@
             <localTemplateSelectors:VirtualMenuItemTemplateSelector 
                 x:Key="VirtualMenuItemTemplateSelector"
                 DocumentProjectReferenceCommandTemplate="{StaticResource DocumentProjectReferenceCommandTemplate}"
+                DocumentProjectGroupContextCommandTemplate="{StaticResource DocumentProjectGroupContextCommandTemplate}"
                 ReloadDocumentReferencesProjectsCommandTemplate="{StaticResource ReloadDocumentReferencesProjectsCommandTemplate}"
                 />
 
@@ -258,6 +316,8 @@
                                     <localControls:TabItemControl
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
+                                        MouseEnter="InteractiveArea_MouseEnter"
+                                        MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
                                         ControlPanelPrimarySlotTemplate="{StaticResource CloseButton_PrimarySlotTemplate}"
                                         ControlPanelSecondarySlotTemplate="{StaticResource PreviewButton_SecondarySlotTemplate}"
@@ -273,6 +333,8 @@
                                     <localControls:TabItemControl
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
+                                        MouseEnter="InteractiveArea_MouseEnter"
+                                        MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
                                         ControlPanelPrimarySlotTemplate="{StaticResource CloseButton_PrimarySlotTemplate}"
                                         ControlPanelSecondarySlotTemplate="{StaticResource UnpinButton_SecondarySlotTemplate}"
@@ -288,6 +350,8 @@
                                     <localControls:TabItemControl
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
+                                        MouseEnter="InteractiveArea_MouseEnter"
+                                        MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
                                         ControlPanelPrimarySlotTemplate="{StaticResource CloseButton_PrimarySlotTemplate}"
                                         ControlPanelSecondarySlotTemplate="{StaticResource PinButton_SecondarySlotTemplate}"

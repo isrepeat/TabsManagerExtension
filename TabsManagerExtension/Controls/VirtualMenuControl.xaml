@@ -11,11 +11,18 @@
                          x:Name="__VirtualMenuControl"
                          Width="200"
                          >
-    <localControls:MenuControl 
-        x:Name="VirtualMenu"
-        MenuItems="{Binding VirtualMenuItems, ElementName=__VirtualMenuControl}"
-        OpenCommand="{Binding OnVirtualMenuOpenCommand, ElementName=__VirtualMenuControl}"
-        CloseCommand="{Binding OnVirtualMenuClosedCommand, ElementName=__VirtualMenuControl}"
-        MenuItemTemplateSelector="{Binding VirtualMenuItemTemplateSelector, ElementName=__VirtualMenuControl}"
-        />
+    <Grid>
+        <localControls:MenuControl
+            x:Name="VirtualMenu"
+            MenuItems="{Binding VirtualMenuItems, ElementName=__VirtualMenuControl}"
+            OpenCommand="{Binding OnVirtualMenuOpenCommand, ElementName=__VirtualMenuControl}"
+            CloseCommand="{Binding OnVirtualMenuClosedCommand, ElementName=__VirtualMenuControl}"
+            MenuItemTemplateSelector="{Binding VirtualMenuItemTemplateSelector, ElementName=__VirtualMenuControl}"
+            />
+
+        <localControls:MenuControl
+            x:Name="ChildVirtualMenu"
+            MenuItems="{Binding ChildVirtualMenuItems, ElementName=__VirtualMenuControl}"
+            />
+    </Grid>
 </helpers:BaseUserControl>

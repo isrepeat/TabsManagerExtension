@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
-    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <MinimumVisualStudioVersion>18.0</MinimumVisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
     <TargetFrameworkProfile />
   </PropertyGroup>
@@ -28,14 +28,15 @@
     <CopyOutputSymbolsToOutputDirectory>true</CopyOutputSymbolsToOutputDirectory>
     <StartAction>Program</StartAction>
     <StartProgram Condition="'$(DevEnvDir)' != ''">$(DevEnvDir)devenv.exe</StartProgram>
-    <StartArguments>"d:\WORK\TEST\Extensions\TestIncludeSolution\TestIncludeSolution.sln" /RootSuffix Exp</StartArguments>
-    <!--<StartArguments>"d:\WORK\TEST\Extensions\SimpleSolution\SimpleSolution.sln" /RootSuffix Exp</StartArguments>-->
-    <!--<StartArguments>"d:\WORK\C++\Cpp\Cpp.sln" /RootSuffix Exp</StartArguments>-->
-    <!--<StartArguments>/RootSuffix Exp</StartArguments>-->
+    <StartArguments>"$(SolutionDir)TESTS\TestIncludeSolution\TestIncludeSolution.sln" /RootSuffix Exp</StartArguments>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
+    <!-- VSIX deploy не является частью Fast Up-to-date Check. Всегда запускаем MSBuild перед F5,
+         чтобы не стартовать Experimental Instance со старой DLL после неудачного deploy. -->
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <DeployExtension>true</DeployExtension>
     <Optimize>false</Optimize>
     <OutputPath>bin\Debug\</OutputPath>
     <DefineConstants>TRACE;DEBUG</DefineConstants>
@@ -69,6 +70,8 @@
     <DefineConstants>$(DefineConstants);VSSDK</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Configuration\TabsManagerConfiguration.cs" />
+    <Compile Include="Configuration\TabsManagerConfigurationService.cs" />
     <Compile Include="Controls\MenuControl.xaml.cs">
       <DependentUpon>MenuControl.xaml</DependentUpon>
     </Compile>
@@ -109,6 +112,7 @@
     <Compile Include="VsShell\Project\VsProjectSharedItemsAnalyzer.cs" />
     <Compile Include="VsShell\Project\VsProjectSourcesAnalyzer.cs" />
     <Compile Include="VsShell\Solution\SolutionHierarchyAnalyzerService.cs" />
+    <Compile Include="VsShell\Solution\CppIncludeParser.cs" />
     <Compile Include="VsShell\VsCommandMapper.cs" />
     <Compile Include="VsShell\Project\ShellProject.cs" />
     <Compile Include="VsShell\Document\SourceFile.cs" />
@@ -185,19 +189,25 @@
     <PackageReference Include="Newtonsoft.Json">
       <Version>13.0.3</Version>
     </PackageReference>
-    <PackageReference Include="Microsoft.Build" Version="17.8.3">
+    <PackageReference Include="Microsoft.Build" Version="18.8.2">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Build.Locator" Version="1.6.10" />
-    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.0.32112.339" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
+    <!-- VS SDK 17.14 is the latest contract package, but VS 2026 provides Interop 18 at runtime. -->
+    <PackageReference Include="Microsoft.VisualStudio.Interop" Version="17.14.40260" ExcludeAssets="compile;runtime" />
     <PackageReference Include="Microsoft.VisualStudio.VCProjectEngine">
       <Version>17.14.40264</Version>
     </PackageReference>
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.11.435" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Microsoft.VisualStudio.Interop">
+      <HintPath>$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.Interop.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Microsoft.VisualStudio.VCCodeModel">
-      <HintPath>C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\PublicAssembliesMicrosoft.VisualStudio.VCCodeModel.dll</HintPath>
+      <HintPath>$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.VCCodeModel.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
@@ -252,6 +262,15 @@
   <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
+  <Target Name="GenerateDoxygenDocumentation"
+          AfterTargets="Build"
+          Condition="'$(GenerateDoxygenDocumentation)' == 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\docs\GenerateDocumentation.ps1&quot;" />
+  </Target>
+  <!-- Microsoft.VSSDK.BuildTools 18.5 still defaults this property to 17.0. -->
+  <PropertyGroup>
+    <VSSDKTargetPlatformVersion>18.0</VSSDKTargetPlatformVersion>
+  </PropertyGroup>
   <Import Project="..\UtilityHelpersLib\HelpersCs\HelpersCs\HelpersCs.projitems" Label="Shared" />
   <Import Project="..\UtilityHelpersLib\HelpersCs\HelpersCs.Attributes\HelpersCs.Attributes.projitems" Label="Shared" />
   <Import Project="..\UtilityHelpersLib\HelpersCs\HelpersCs.Diagnostic\HelpersCs.Diagnostic.projitems" Label="Shared" />

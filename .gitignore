@@ -338,3 +338,4 @@ out/
 
 ## Doxyfiles
 Doxygen_Documentation_HTML/
+.tools/

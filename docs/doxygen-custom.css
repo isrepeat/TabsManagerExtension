@@ -1,0 +1,34 @@
+/* Дополнение к штатной теме Doxygen: большие SVG-графы используют ширину окна. */
+.contents {
+    max-width: none;
+}
+
+.dotgraph,
+.dotgraph iframe,
+.dotgraph object,
+.dotgraph img,
+.dotgraph svg {
+    max-width: 100%;
+}
+
+/* Одинаковый тёмный холст для ручных Graphviz-диаграм. */
+.dotgraph iframe,
+.dotgraph object,
+.dotgraph img {
+    background: #1b1f26;
+    border: 1px solid #343b46;
+    border-radius: 6px;
+}
+
+/* Цвета автоматических class/collaboration-графов записываются в сам SVG
+   скриптом генерации; здесь остаётся рамка и резервный фон iframe. */
+.dyncontent iframe[src$="_graph.svg"],
+.dyncontent img[src$="_graph.svg"] {
+    background: #1b1f26;
+    border: 1px solid #343b46;
+    border-radius: 6px;
+}
+
+div.fragment {
+    max-width: 100%;
+}

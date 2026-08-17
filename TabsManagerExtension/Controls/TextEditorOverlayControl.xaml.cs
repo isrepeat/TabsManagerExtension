@@ -41,10 +41,10 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
-        public ObservableCollection<AnchorPoint> Anchors { get; } = new();
+        public ObservableCollection<State.TextEditor.AnchorPoint> Anchors { get; } = new();
 
-        private AnchorPoint? _selectedAnchor;
-        public AnchorPoint? SelectedAnchor {
+        private State.TextEditor.AnchorPoint? _selectedAnchor;
+        public State.TextEditor.AnchorPoint? SelectedAnchor {
             get => _selectedAnchor;
             set {
                 if (_selectedAnchor != value) {
@@ -110,9 +110,10 @@ namespace TabsManagerExtension.Controls {
                 lines.Add(point.GetLines(i, i + 1));
             }
 
-            var anchors = AnchorParser.ParseLinesWithContextWindow(lines);
-            var final = AnchorParser.InsertSeparators(anchors);
+            var anchors = State.TextEditor.AnchorParser.ParseLinesWithContextWindow(lines);
+            var final = State.TextEditor.AnchorParser.InsertSeparators(anchors);
 
+            // Если this.Anchors.Count > 0 - будет отображена кнопка.
             foreach (var anchor in final) {
                 this.Anchors.Add(anchor);
             }

@@ -94,7 +94,35 @@ namespace TabsManagerExtension.VsShell.Document {
             base.OnCommonStatePropertyChanged(sender, e);
         }
 
-        protected void OpenWithProjectContext() {
+        public IReadOnlyList<string> GetProjectContextSwitchSourcePaths(Project.LoadedProject? targetProject = null) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            targetProject ??= base.ProjectBaseViewModel as Project.LoadedProject;
+            if (targetProject == null) {
+                return Array.Empty<string>();
+            }
+
+            var includeDependencyAnalyzer = VsShell.Solution.Services.IncludeDependencyAnalyzerService.Instance;
+            if (!includeDependencyAnalyzer.IsReady()) {
+                Helpers.Diagnostic.Logger.LogWarning("[Document.GetProjectContextSwitchSourcePaths] Include dependency graph is not ready.");
+                return Array.Empty<string>();
+            }
+
+            return includeDependencyAnalyzer
+                .GetTransitiveFilesIncludersByIncludePath(base.HierarchyItemEntry.BaseViewModel.FilePath)
+                .Where(sourceFile =>
+                    sourceFile.LoadedProject.ProjectGuid == targetProject.ProjectGuid &&
+                    string.Equals(System.IO.Path.GetExtension(sourceFile.FilePath), ".cpp", StringComparison.OrdinalIgnoreCase))
+                .Select(sourceFile => sourceFile.FilePath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        protected void OpenWithProjectContext(
+            bool restoreActiveDocument = true,
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             Helpers.ThrowableAssert.Require(!base.CommonState.IsDisposed);
@@ -104,13 +132,18 @@ namespace TabsManagerExtension.VsShell.Document {
             var ownProject = base.ProjectBaseViewModel as Project.LoadedProject;
 
             // Сохраняем активный документ до всех действий.
-            var activeDocumentBefore = PackageServices.Dte2.ActiveDocument;
+            var activeDocumentPathBefore = PackageServices.Dte2.ActiveDocument?.FullName;
 
             // Попытка найти первый cpp/h файл проекта,
             // чтобы открыть его и "переключить" контекст редактора на нужный проект.
             // Это нужно для того, чтобы при открытии внешнего include файла
             // Visual Studio знала, что контекстом открытия является именно этот проект.
             var includeDependencyAnalyzer = VsShell.Solution.Services.IncludeDependencyAnalyzerService.Instance;
+            if (!includeDependencyAnalyzer.IsReady()) {
+                Helpers.Diagnostic.Logger.LogWarning("[Document.OpenWithProjectContext] Include dependency graph is not ready.");
+                return;
+            }
+
             var allTransitiveIncludingFiles = includeDependencyAnalyzer
                 .GetTransitiveFilesIncludersByIncludePath(base.HierarchyItemEntry.BaseViewModel.FilePath);
 
@@ -118,32 +151,64 @@ namespace TabsManagerExtension.VsShell.Document {
                 .Where(sf => sf.LoadedProject.Equals(ownProject))
                 .ToList();
 
-            // Нужно открывать именно .cpp файл который реально включает наш include,
-            // чтоб сработала смена контекста.
-            var contextSwitchSourceFile = currentProjectTransitiveIncludingFiles
-                .FirstOrDefault(sf => System.IO.Path.GetExtension(sf.FilePath) == ".cpp");
-
-            if (contextSwitchSourceFile == null) {
-                return;
-            }
+            // Нужно открывать именно .cpp файл, который реально включает наш include.
+            // Закрытый файл предпочтительнее: после короткой активации мы сразу закроем его,
+            // поэтому пользователь почти не увидит служебную смену editor frame.
+            var openDocumentPaths = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .Select(d => d.FullName)
+                .Where(path => !string.IsNullOrEmpty(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
-            var contextSwitchDocument = solutionHierarchyAnalyzer.SourcesRepresentationsTable
-                .GetDocumentByProjectAndDocumentPath(base.ProjectBaseViewModel, contextSwitchSourceFile.FilePath);
+            var contextSwitchCandidates = currentProjectTransitiveIncludingFiles
+                .Where(sf => string.Equals(
+                    System.IO.Path.GetExtension(sf.FilePath),
+                    ".cpp",
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                .Select(sf => new {
+                    SourceFile = sf,
+                    Document = solutionHierarchyAnalyzer.SourcesRepresentationsTable
+                        .GetDocumentByProjectAndDocumentPath(base.ProjectBaseViewModel, sf.FilePath)
+                })
+                .Where(candidate => candidate.Document != null)
+                .ToList();
 
-            var contextSwitchDocumentProject = contextSwitchDocument?.BaseViewModel.ProjectBaseViewModel as Project.LoadedProject;
-            if (Helpers.Assert.Require(contextSwitchDocumentProject != null).Failed) {
+            var contextSwitchCandidate = contextSwitchCandidates
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.SourceFile.FilePath,
+                    preferredContextSwitchSourcePath,
+                    StringComparison.OrdinalIgnoreCase
+                ))
+                ?? contextSwitchCandidates.FirstOrDefault(candidate =>
+                    activatedContextSwitchSources?.Contains(candidate.SourceFile.FilePath) == true)
+                ?? contextSwitchCandidates
+                .FirstOrDefault(candidate => !openDocumentPaths.Contains(candidate.SourceFile.FilePath))
+                ?? contextSwitchCandidates.FirstOrDefault();
+
+            if (contextSwitchCandidate == null) {
+                Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] No usable .cpp representation was found in project '{ownProject.UniqueName}'.");
                 return;
             }
 
-            var contextSwitchDocumentHierarchyItem = contextSwitchDocument?.BaseViewModel.HierarchyItemEntry.BaseViewModel as Hierarchy.RealHierarchyItem;
+            var contextSwitchDocument = contextSwitchCandidate.Document;
+            var contextSwitchDocumentProject = contextSwitchDocument.BaseViewModel.ProjectBaseViewModel as Project.LoadedProject;
+            if (contextSwitchDocumentProject == null) {
+                Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Source representation '{contextSwitchCandidate.SourceFile.FilePath}' has no loaded project.");
+                return;
+            }
+
+            var contextSwitchDocumentHierarchyItem = contextSwitchDocument.BaseViewModel.HierarchyItemEntry.BaseViewModel as Hierarchy.RealHierarchyItem;
             if (contextSwitchDocumentHierarchyItem == null) {
-                System.Diagnostics.Debugger.Break();
+                Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Source representation '{contextSwitchCandidate.SourceFile.FilePath}' has no real hierarchy item.");
                 return;
             }
 
             bool needCloseContextSwitchDocumentNode =
-                !Utils.EnvDteUtils.IsDocumentOpen(contextSwitchDocumentHierarchyItem.FilePath);
+                !openDocumentPaths.Contains(contextSwitchDocumentHierarchyItem.FilePath);
+
+            Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Context switch source '{contextSwitchDocumentHierarchyItem.FilePath}' was {(needCloseContextSwitchDocumentNode ? "closed" : "already open")} before activation.");
 
             int hr = VSConstants.S_OK;
 
@@ -153,16 +218,25 @@ namespace TabsManagerExtension.VsShell.Document {
                 base.HierarchyItemEntry.BaseViewModel.ItemId);
             ErrorHandler.ThrowOnFailure(hr);
 
-            // Переключаемся на файл который включает наш файл (для смены activeDocumentFrame)
-            // иначе IntelliSense не подхватит контекст.
-            hr = Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
-                contextSwitchDocumentProject.ProjectHierarchy.VsRealHierarchy,
-                contextSwitchDocumentHierarchyItem.ItemId);
-            ErrorHandler.ThrowOnFailure(hr);
-            
+            bool sourceWasActivatedInThisBatch =
+                activatedContextSwitchSources?.Contains(contextSwitchDocumentHierarchyItem.FilePath) == true;
 
-            // Закрываем временный файл переключения контекста.
-            if (needCloseContextSwitchDocumentNode) {
+            if (!sourceWasActivatedInThisBatch) {
+                // Один .cpp может транзитивно включать несколько выбранных хедеров. В групповой
+                // операции активируем его только для первого хедера, а остальные используют уже
+                // обновлённый translation-unit context без лишнего мерцания editor frame.
+                hr = Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
+                    contextSwitchDocumentProject.ProjectHierarchy.VsRealHierarchy,
+                    contextSwitchDocumentHierarchyItem.ItemId);
+                ErrorHandler.ThrowOnFailure(hr);
+                activatedContextSwitchSources?.Add(contextSwitchDocumentHierarchyItem.FilePath);
+            }
+            else {
+                Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Reusing already activated context switch source '{contextSwitchDocumentHierarchyItem.FilePath}'.");
+            }
+
+            // Закрываем только тот временный файл, который действительно открыли на этом шаге.
+            if (!sourceWasActivatedInThisBatch && needCloseContextSwitchDocumentNode) {
                 var doc = PackageServices.Dte2.Documents.Cast<EnvDTE.Document>()
                     .FirstOrDefault(d =>
                         string.Equals(
@@ -176,11 +250,29 @@ namespace TabsManagerExtension.VsShell.Document {
 
             this.IsOppenedWithProjectContext = true;
 
-            // Возвращаем активным предыдущий документ.
-            VsixThreadHelper.RunOnUiThread(async () => {
-                await Task.Delay(20);
-                activeDocumentBefore?.Activate();
-            });
+            if (restoreActiveDocument) {
+                // Возвращаем активным предыдущий документ.
+                VsixThreadHelper.RunOnUiThread(async () => {
+                    await Task.Delay(20);
+                    // Shared-header при смене context закрывается и открывается заново. Поэтому
+                    // сохранённый EnvDTE.Document уже может быть недействительным COM-объектом;
+                    // например, Activate() на старом SharedUtils.h возвращает E_UNEXPECTED.
+                    var currentDocument = PackageServices.Dte2.Documents
+                        .Cast<EnvDTE.Document>()
+                        .FirstOrDefault(document => string.Equals(
+                            document.FullName,
+                            activeDocumentPathBefore,
+                            StringComparison.OrdinalIgnoreCase
+                        ));
+
+                    if (currentDocument != null) {
+                        currentDocument.Activate();
+                    }
+                    else if (!string.IsNullOrEmpty(activeDocumentPathBefore)) {
+                        Helpers.Diagnostic.Logger.LogDebug($"[Document.OpenWithProjectContext] Cannot restore active document '{activeDocumentPathBefore}' because its current frame was not found.");
+                    }
+                });
+            }
         }
     }
 
@@ -193,54 +285,240 @@ namespace TabsManagerExtension.VsShell.Document {
         public SharedItem(_Details.DocumentCommonState commonState) : base(commonState) {
         }
 
-        public new void OpenWithProjectContext() {
-            // Получаем все проекты, которые знают про этот файл.
-            // NOTE: Поскольку мы не используем текущий проект нам не нужно дожидаться пока
-            //       у него подгрузяться externalIncluede чтоб использовать solutionHierarchyAnalyzer.
+        public new void OpenWithProjectContext(
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (base.ProjectBaseViewModel is not Project.LoadedProject targetProject) {
+                Helpers.Diagnostic.Logger.LogError("[SharedItem.OpenWithProjectContext] Target project is not loaded.");
+                return;
+            }
+
             var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
             var sharedItemProjects = solutionHierarchyAnalyzer.SharedItemsRepresentationsTable
                 .GetProjectsByDocumentPath(base.HierarchyItemEntry.BaseViewModel.FilePath);
 
-            var externalIncludeProjects = solutionHierarchyAnalyzer.ExternalIncludeRepresentationsTable
-                .GetProjectsByDocumentPath(base.HierarchyItemEntry.BaseViewModel.FilePath);
+            var sharedProject = sharedItemProjects
+                .Select(p => p.MultiState.Current)
+                .OfType<Project.LoadedProject>()
+                .FirstOrDefault(p => p.IsSharedProject);
 
-            // Собираем все проекты на выгрузку, кроме текущего 'base.ProjectBaseViewModel'
-            // и оригинального 'IsSharedProject'.
-            var sharedItemProjectGuidsToUnload = sharedItemProjects
-                .Where(p => p.IsLoaded && !p.BaseViewModel.Equals(base.ProjectBaseViewModel) && !p.BaseViewModel.IsSharedProject)
-                .Select(p => p.BaseViewModel.ProjectGuid)
-                .ToList();
-
-            var externalIncludeProjectGuidsToUnload = externalIncludeProjects
-                .Where(p => p.IsLoaded && !p.BaseViewModel.Equals(base.ProjectBaseViewModel))
-                .Select(p => p.BaseViewModel.ProjectGuid)
-                .ToList();
-
-            foreach (var projectGuid in sharedItemProjectGuidsToUnload) {
-                Utils.VsHierarchyUtils.UnloadProject(projectGuid);
+            if (sharedProject == null) {
+                Helpers.Diagnostic.Logger.LogError($"[SharedItem.OpenWithProjectContext] Shared project was not found for '{base.HierarchyItemEntry.BaseViewModel.FilePath}'.");
+                return;
             }
 
-            // Выгружаем все остальные связанные проекты (т.е. те которые содержат данный файл как External Dependencies)
-            // только лишь когда на целевой проект ещще не было переключений контекста или когда
-            // имеются другие sharedItems проект которые еще не выгружены. Это нужно чтобы
-            // контекст целевого проекта установился наверняка.
-            bool shouldReloadExternalIncludesProjects =
-                sharedItemProjectGuidsToUnload.Count > 0 ||
-                base.IsOppenedWithProjectContext == false;
+            var sharedHierarchy = sharedProject.ProjectHierarchy.VsRealHierarchy;
+            var targetHierarchy = targetProject.ProjectHierarchy.VsRealHierarchy;
+            int hr = sharedHierarchy.SetProperty(
+                VSConstants.VSITEMID_ROOT,
+                (int)__VSHPROPID7.VSHPROPID_SharedItemContextHierarchy,
+                targetHierarchy
+            );
 
-            if (shouldReloadExternalIncludesProjects) {
-                foreach (var projectGuid in externalIncludeProjectGuidsToUnload) {
-                    Utils.VsHierarchyUtils.UnloadProject(projectGuid);
+            if (ErrorHandler.Failed(hr)) {
+                Helpers.Diagnostic.Logger.LogError($"[SharedItem.OpenWithProjectContext] Failed to set context '{targetProject.UniqueName}' on '{sharedProject.UniqueName}': HRESULT=0x{hr:X8}.");
+                return;
+            }
+
+            sharedHierarchy.GetProperty(
+                VSConstants.VSITEMID_ROOT,
+                (int)__VSHPROPID7.VSHPROPID_SharedItemContextHierarchy,
+                out var actualContextObject
+            );
+
+            var actualContextHierarchy = actualContextObject as IVsHierarchy;
+            if (actualContextHierarchy == null) {
+                Helpers.Diagnostic.Logger.LogError($"[SharedItem.OpenWithProjectContext] Visual Studio returned no active context for '{sharedProject.UniqueName}'.");
+                return;
+            }
+
+            PackageServices.VsSolution.GetGuidOfProject(targetHierarchy, out var targetProjectGuid);
+            PackageServices.VsSolution.GetGuidOfProject(actualContextHierarchy, out var actualContextProjectGuid);
+
+            if (actualContextProjectGuid != targetProjectGuid) {
+                Helpers.Diagnostic.Logger.LogError($"[SharedItem.OpenWithProjectContext] Visual Studio did not retain context '{targetProject.UniqueName}'.");
+                return;
+            }
+
+            Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Context switched: '{sharedProject.UniqueName}' -> '{targetProject.UniqueName}'.");
+
+            var openDocument = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .FirstOrDefault(d => string.Equals(
+                    d.FullName,
+                    base.HierarchyItemEntry.BaseViewModel.FilePath,
+                    StringComparison.OrdinalIgnoreCase
+                ));
+
+            int? caretLine = null;
+            int? caretOffset = null;
+
+            if (openDocument != null && !openDocument.Saved) {
+                Helpers.Diagnostic.Logger.LogError($"[SharedItem.OpenWithProjectContext] Cannot reopen modified document '{openDocument.FullName}'. Save it before switching project context.");
+                return;
+            }
+
+            if (openDocument?.Selection is EnvDTE.TextSelection textSelection) {
+                caretLine = textSelection.ActivePoint.Line;
+                caretOffset = textSelection.ActivePoint.LineCharOffset;
+            }
+
+            bool TryRetargetOpenDocumentFrame() {
+                ThreadHelper.ThrowIfNotOnUIThread();
+
+                PackageServices.VsUIShell.GetDocumentWindowEnum(out var windowFramesEnum);
+                var frames = new IVsWindowFrame[1];
+
+                while (windowFramesEnum.Next(1, frames, out uint fetched) == VSConstants.S_OK && fetched == 1) {
+                    var frame = frames[0];
+                    int pathHr = frame.GetProperty((int)__VSFPROPID.VSFPROPID_pszMkDocument, out var documentPathObject);
+                    if (ErrorHandler.Failed(pathHr) ||
+                        documentPathObject is not string documentPath ||
+                        !string.Equals(documentPath, base.HierarchyItemEntry.BaseViewModel.FilePath, StringComparison.OrdinalIgnoreCase)) {
+                        continue;
+                    }
+
+                    frame.GetProperty((int)__VSFPROPID.VSFPROPID_Hierarchy, out var previousHierarchyObject);
+                    frame.GetProperty((int)__VSFPROPID.VSFPROPID_ItemID, out var previousItemIdObject);
+
+                    int hierarchyHr = frame.SetProperty((int)__VSFPROPID.VSFPROPID_Hierarchy, targetHierarchy);
+                    int itemIdHr = ErrorHandler.Succeeded(hierarchyHr)
+                        ? frame.SetProperty((int)__VSFPROPID.VSFPROPID_ItemID, base.HierarchyItemEntry.BaseViewModel.ItemId)
+                        : hierarchyHr;
+
+                    frame.GetProperty((int)__VSFPROPID.VSFPROPID_Hierarchy, out var actualHierarchyObject);
+                    frame.GetProperty((int)__VSFPROPID.VSFPROPID_ItemID, out var actualItemIdObject);
+
+                    var actualHierarchy = actualHierarchyObject as IVsHierarchy;
+                    PackageServices.VsSolution.GetGuidOfProject(actualHierarchy, out var actualHierarchyGuid);
+                    uint actualItemId = Convert.ToUInt32(actualItemIdObject);
+                    bool retargeted =
+                        ErrorHandler.Succeeded(hierarchyHr) &&
+                        ErrorHandler.Succeeded(itemIdHr) &&
+                        actualHierarchyGuid == targetProjectGuid &&
+                        actualItemId == base.HierarchyItemEntry.BaseViewModel.ItemId;
+
+                    if (retargeted) {
+                        Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Existing frame retargeted to '{targetProject.UniqueName}' without reopening.");
+                        return true;
+                    }
+
+                    if (previousHierarchyObject != null) {
+                        frame.SetProperty((int)__VSFPROPID.VSFPROPID_Hierarchy, previousHierarchyObject);
+                    }
+
+                    if (previousItemIdObject != null) {
+                        frame.SetProperty((int)__VSFPROPID.VSFPROPID_ItemID, previousItemIdObject);
+                    }
+
+                    Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Frame retarget was rejected: hierarchy HRESULT=0x{hierarchyHr:X8}, item HRESULT=0x{itemIdHr:X8}. Falling back to reopen.");
+                    return false;
+                }
+
+                Helpers.Diagnostic.Logger.LogDebug("[SharedItem.OpenWithProjectContext] Open document frame was not found. Falling back to reopen.");
+                return false;
+            }
+
+            void ReopenDocumentInTargetHierarchy() {
+                ThreadHelper.ThrowIfNotOnUIThread();
+
+                var documentToReopen = PackageServices.Dte2.Documents
+                    .Cast<EnvDTE.Document>()
+                    .FirstOrDefault(d => string.Equals(
+                        d.FullName,
+                        base.HierarchyItemEntry.BaseViewModel.FilePath,
+                        StringComparison.OrdinalIgnoreCase
+                    ));
+
+                Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Closing existing document frame before reopening in '{targetProject.UniqueName}'.");
+                documentToReopen?.Close(EnvDTE.vsSaveChanges.vsSaveChangesNo);
+
+                int reopenHr = Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
+                    targetHierarchy,
+                    base.HierarchyItemEntry.BaseViewModel.ItemId
+                );
+
+                ErrorHandler.ThrowOnFailure(reopenHr);
+
+                if (caretLine.HasValue && caretOffset.HasValue) {
+                    var reopenedDocument = PackageServices.Dte2.Documents
+                        .Cast<EnvDTE.Document>()
+                        .FirstOrDefault(d => string.Equals(
+                            d.FullName,
+                            base.HierarchyItemEntry.BaseViewModel.FilePath,
+                            StringComparison.OrdinalIgnoreCase
+                        ));
+
+                    if (reopenedDocument?.Selection is EnvDTE.TextSelection reopenedSelection) {
+                        reopenedSelection.MoveToLineAndOffset(caretLine.Value, caretOffset.Value, false);
+                    }
                 }
             }
 
-            base.OpenWithProjectContext();
+            bool frameRetargeted = TryRetargetOpenDocumentFrame();
 
-            if (shouldReloadExternalIncludesProjects) {
-                foreach (var projectGuid in externalIncludeProjectGuidsToUnload) {
-                    Utils.VsHierarchyUtils.ReloadProject(projectGuid);
+            // C++ language service не всегда применяет новый shared-context только по событию
+            // VSHPROPID_SharedItemContextHierarchy. Кратковременно активируем включающий .cpp,
+            // сразу возвращаем header, а после обработки смены translation unit переоткрываем
+            // его в новой hierarchy. Так уже открытый .cpp не остаётся видимым на время ожидания.
+            if (!targetProject.IsSharedProject) {
+                if (frameRetargeted) {
+                    Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Including .cpp activation skipped because the existing frame already accepted context '{targetProject.UniqueName}'.");
+                    return;
                 }
+
+                base.OpenWithProjectContext(
+                    restoreActiveDocument: true,
+                    preferredContextSwitchSourcePath: preferredContextSwitchSourcePath,
+                    activatedContextSwitchSources: activatedContextSwitchSources
+                );
+
+                VsixThreadHelper.RunOnUiThread(async () => {
+                    await Task.Delay(300);
+                    ReopenDocumentInTargetHierarchy();
+                });
+
+                return;
             }
+
+            // Сам shared-проект владеет файлом, но не имеет включающего translation unit.
+            if (!frameRetargeted) {
+                ReopenDocumentInTargetHierarchy();
+            }
+
+            var reopenedSharedDocument = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .FirstOrDefault(d => string.Equals(
+                    d.FullName,
+                    base.HierarchyItemEntry.BaseViewModel.FilePath,
+                    StringComparison.OrdinalIgnoreCase
+                ));
+
+            var frameSwitchDocument = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .FirstOrDefault(d => !string.Equals(
+                    d.FullName,
+                    base.HierarchyItemEntry.BaseViewModel.FilePath,
+                    StringComparison.OrdinalIgnoreCase
+                ));
+
+            if (reopenedSharedDocument != null && frameSwitchDocument != null) {
+                Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Refreshing owner context through frame '{frameSwitchDocument.Name}'.");
+                frameSwitchDocument.Activate();
+
+                VsixThreadHelper.RunOnUiThread(async () => {
+                    await Task.Delay(100);
+                    reopenedSharedDocument.Activate();
+                });
+            }
+            else {
+                Helpers.Diagnostic.Logger.LogDebug("[SharedItem.OpenWithProjectContext] Owner context frame refresh was skipped because no other open document is available.");
+            }
+
+            Helpers.Diagnostic.Logger.LogDebug($"[SharedItem.OpenWithProjectContext] Owner context '{targetProject.UniqueName}' does not require an including .cpp activation.");
         }
 
         public override string ToString() {
@@ -257,8 +535,14 @@ namespace TabsManagerExtension.VsShell.Document {
         public ExternalInclude(_Details.DocumentCommonState commonState) : base(commonState) {
         }
 
-        public new void OpenWithProjectContext() {
-            base.OpenWithProjectContext();
+        public new void OpenWithProjectContext(
+            string? preferredContextSwitchSourcePath = null,
+            ISet<string>? activatedContextSwitchSources = null
+            ) {
+            base.OpenWithProjectContext(
+                preferredContextSwitchSourcePath: preferredContextSwitchSourcePath,
+                activatedContextSwitchSources: activatedContextSwitchSources
+            );
         }
 
         public override string ToString() {
