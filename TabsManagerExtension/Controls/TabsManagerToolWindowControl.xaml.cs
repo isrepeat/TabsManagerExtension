@@ -62,6 +62,20 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        public ObservableCollection<State.BackgroundOperationStatus> BackgroundOperations =>
+            Services.ExtensionStatusService.Instance.Operations;
+
+        private bool _isIncludeGraphReady;
+        public bool IsIncludeGraphReady {
+            get => _isIncludeGraphReady;
+            private set {
+                if (_isIncludeGraphReady != value) {
+                    _isIncludeGraphReady = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
         private double _scaleFactorUI = 1.0;
         public double ScaleFactorUI {
             get => _scaleFactorUI;
@@ -96,6 +110,7 @@ namespace TabsManagerExtension.Controls {
         private FileSystemWatcher _fileWatcher;
         private bool _isRestoringToolWindows;
         private bool _isSolutionClosing;
+        private string? _openDocumentsLoadedForSolution;
 
         private Helpers.Collections.GroupsSelectionCoordinator<TabItemsGroupBase, TabItemBase> _tabItemsSelectionCoordinator;
         private VsShell.TextEditor.Overlay.TextEditorOverlayController _textEditorOverlayController;
@@ -109,6 +124,8 @@ namespace TabsManagerExtension.Controls {
         public ICommand OnTabItemContextMenuClosedCommand { get; }
         public ICommand OnTabItemVirtualMenuOpenCommand { get; }
         public ICommand OnTabItemVirtualMenuClosedCommand { get; }
+        public ICommand OnProjectContextIncludersOpenCommand { get; }
+        public ICommand OnProjectContextMenuItemMouseEnterCommand { get; }
 
         public TabsManagerToolWindowControl() {
             this.InitializeComponent();
@@ -127,6 +144,8 @@ namespace TabsManagerExtension.Controls {
             
             this.OnTabItemVirtualMenuOpenCommand = new Helpers.RelayCommand<object>(this.OnTabItemVirtualMenuOpen);
             this.OnTabItemVirtualMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnTabItemVirtualMenuClosed);
+            this.OnProjectContextIncludersOpenCommand = new Helpers.RelayCommand<object>(this.OnProjectContextIncludersOpen);
+            this.OnProjectContextMenuItemMouseEnterCommand = new Helpers.RelayCommand<object>(this.OnProjectContextMenuItemMouseEnter);
         }
 
 
@@ -136,6 +155,10 @@ namespace TabsManagerExtension.Controls {
         //
         private void OnLoaded(object sender, RoutedEventArgs e) {
             Services.ExtensionServices.BeginUsage();
+            Services.ExtensionStatusService.Instance.FeatureReadinessChanged += this.OnFeatureReadinessChanged;
+            this.IsIncludeGraphReady = Services.ExtensionStatusService.Instance.IsFeatureReady(
+                Services.ExtensionStatusService.IncludeGraphFeature
+            );
 
             this.InitializeDTE();
             this.InitializeFileWatcher();
@@ -143,11 +166,14 @@ namespace TabsManagerExtension.Controls {
             this.InitializeTabItemsSelectionCoordinator();
             this.InitializeBackgroundRoutine();
 
-            // Entry point:
-            this.LoadOpenDocuments();
+            var hierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
+            hierarchyAnalyzer.InitialAnalysisCompleted.Add(this.OnInitialHierarchyAnalysisCompleted);
+            hierarchyAnalyzer.InitialAnalysisCompleted.InvokeForLastHandlerIfTriggered();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.Remove(this.OnInitialHierarchyAnalysisCompleted);
+            Services.ExtensionStatusService.Instance.FeatureReadinessChanged -= this.OnFeatureReadinessChanged;
             this.SaveOpenToolWindows();
             this.UninitializeTabItemsSelectionCoordinator();
             this.UninitializeVsShellTrackers();
@@ -155,6 +181,25 @@ namespace TabsManagerExtension.Controls {
             this.UninitializeDTE();
 
             Services.ExtensionServices.EndUsage();
+        }
+
+        private void OnInitialHierarchyAnalysisCompleted(string solutionName) {
+            if (string.Equals(
+                _openDocumentsLoadedForSolution,
+                solutionName,
+                StringComparison.OrdinalIgnoreCase)) {
+
+                return;
+            }
+
+            _openDocumentsLoadedForSolution = solutionName;
+            this.LoadOpenDocuments();
+        }
+
+        private void OnFeatureReadinessChanged(string feature, bool isReady) {
+            if (feature == Services.ExtensionStatusService.IncludeGraphFeature) {
+                this.IsIncludeGraphReady = isReady;
+            }
         }
 
         private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e) {
@@ -257,9 +302,9 @@ namespace TabsManagerExtension.Controls {
                     var watcherToDispose = _fileWatcher;
                     _fileWatcher = null;
 
-                    // Dispatcher.BeginInvoke(..., DispatcherPriority.ApplicationIdle) — ждет, пока текущий UI-цикл и все запланированные задачи завершатся.
+                    // DispatcherPriority.ApplicationIdle — ждет, пока текущий UI-цикл и все запланированные задачи завершатся.
                     // Таким образом Dispose() вызывается после завершения Run(...) внутри событий FileSystemWatcher
-                    Dispatcher.BeginInvoke(new Action(() => {
+                    VsixThreadHelper.RunOnUiThread(Dispatcher, () => {
                         try {
                             // Копируем ссылку на _fileWatcher чтобы продлить жизнь, т.к. _fileWatcher уже может быть удален
                             // во время исполнения лямбды, но его ресурсы так и не будут освобождены.
@@ -268,7 +313,7 @@ namespace TabsManagerExtension.Controls {
                         catch (Exception ex) {
                             Helpers.Diagnostic.Logger.LogError($"Delayed dispose of FileSystemWatcher failed: {ex}");
                         }
-                    }), DispatcherPriority.ApplicationIdle);
+                    }, DispatcherPriority.ApplicationIdle);
                 }
                 catch (Exception ex) {
                     Helpers.Diagnostic.Logger.LogError($"Error while scheduling FileSystemWatcher disposal: {ex}");
@@ -454,7 +499,7 @@ namespace TabsManagerExtension.Controls {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             Helpers.Diagnostic.Logger.LogParam($"closingWindow.Caption = {closingWindow?.Caption}");
-            Dispatcher.BeginInvoke(new Action(this.SaveOpenToolWindows), DispatcherPriority.Background);
+            VsixThreadHelper.RunOnUiThread(Dispatcher, this.SaveOpenToolWindows, DispatcherPriority.Background);
         }
 
 
@@ -932,12 +977,55 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
-        private void ProjectContextIncludersButton_Click(object sender, RoutedEventArgs e) {
+        private void OnMoveTabItemToRelatedProjectFile(object parameter) {
             ThreadHelper.ThrowIfNotOnUIThread();
-            e.Handled = true;
+            this.VirtualMenuControl.HideImmediately();
 
-            if (sender is not Button button ||
-                button.DataContext is not Helpers.MenuItemCommand menuItem ||
+            if (parameter is not ProjectContextSourceEntry sourceEntry) {
+                return;
+            }
+
+            var projectEntry = sourceEntry.ProjectContext switch {
+                DocumentProjectReferencesInfo.RefEntry refEntry => refEntry.ProjectEntry,
+                DocumentProjectReferencesInfo.GroupContextEntry groupContext => groupContext.ProjectEntry,
+                _ => null
+            };
+            if (projectEntry?.MultiState.Current is not VsShell.Project.LoadedProject loadedProject) {
+                return;
+            }
+
+            var sourceDocument = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance
+                .SourcesRepresentationsTable
+                .GetDocumentByProjectAndDocumentPath(projectEntry.BaseViewModel, sourceEntry.SourcePath);
+            if (sourceDocument?.BaseViewModel.HierarchyItemEntry.BaseViewModel is VsShell.Hierarchy.RealHierarchyItem hierarchyItem) {
+                int hr = VsShell.Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
+                    loadedProject.ProjectHierarchy.VsRealHierarchy,
+                    hierarchyItem.ItemId
+                );
+
+                ErrorHandler.ThrowOnFailure(hr);
+                return;
+            }
+
+            // Shared-файл может входить в граф конкретного project context, но не иметь
+            // собственного узла в SourcesRepresentationsTable этого .vcxproj. В таком случае
+            // открываем сам физический файл, не запуская переключение контекста хедера.
+            if (!File.Exists(sourceEntry.SourcePath)) {
+                Helpers.Diagnostic.Logger.LogWarning($"[OnMoveTabItemToRelatedProjectFile] File '{sourceEntry.SourcePath}' does not exist.");
+                return;
+            }
+
+            Helpers.Diagnostic.Logger.LogDebug($"[OnMoveTabItemToRelatedProjectFile] Opening shared source by path: '{sourceEntry.SourcePath}'.");
+            PackageServices.Dte2.ItemOperations
+                .OpenFile(sourceEntry.SourcePath, EnvDTE.Constants.vsViewKindTextView)
+                .Activate();
+        }
+
+        private void OnProjectContextIncludersOpen(object parameter) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (parameter is not FrameworkElement anchor ||
+                anchor.DataContext is not Helpers.MenuItemCommand menuItem ||
                 menuItem.CommandParameterContext is not object projectContext) {
 
                 return;
@@ -950,14 +1038,14 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
-            this.ShowProjectContextIncludersMenu(button, projectContext);
+            this.ShowProjectContextIncludersMenu(anchor, projectContext);
         }
 
-        private void ProjectContextMenuItem_MouseEnter(object sender, MouseEventArgs e) {
+        private void OnProjectContextMenuItemMouseEnter(object parameter) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             if (!this.VirtualMenuControl.IsChildMenuOpen ||
-                sender is not MenuItem menuItem ||
+                parameter is not MenuItem menuItem ||
                 menuItem.DataContext is not Helpers.MenuItemCommand menuItemCommand) {
 
                 return;
@@ -1015,39 +1103,6 @@ namespace TabsManagerExtension.Controls {
                 .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
-        }
-
-        private void OnMoveTabItemToRelatedProjectFile(object parameter) {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            this.VirtualMenuControl.HideImmediately();
-
-            if (parameter is not ProjectContextSourceEntry sourceEntry) {
-                return;
-            }
-
-            var projectEntry = sourceEntry.ProjectContext switch {
-                DocumentProjectReferencesInfo.RefEntry refEntry => refEntry.ProjectEntry,
-                DocumentProjectReferencesInfo.GroupContextEntry groupContext => groupContext.ProjectEntry,
-                _ => null
-            };
-            if (projectEntry?.MultiState.Current is not VsShell.Project.LoadedProject loadedProject) {
-                return;
-            }
-
-            var sourceDocument = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance
-                .SourcesRepresentationsTable
-                .GetDocumentByProjectAndDocumentPath(projectEntry.BaseViewModel, sourceEntry.SourcePath);
-            if (sourceDocument?.BaseViewModel.HierarchyItemEntry.BaseViewModel is not VsShell.Hierarchy.RealHierarchyItem hierarchyItem) {
-                Helpers.Diagnostic.Logger.LogWarning($"[OnMoveTabItemToRelatedProjectFile] Cannot find '{sourceEntry.SourcePath}' in project '{projectEntry.BaseViewModel.UniqueName}'.");
-                return;
-            }
-
-            int hr = VsShell.Utils.VsHierarchyUtils.ClickOnSolutionHierarchyItem(
-                loadedProject.ProjectHierarchy.VsRealHierarchy,
-                hierarchyItem.ItemId
-            );
-
-            ErrorHandler.ThrowOnFailure(hr);
         }
 
         private static VsShell.Document.Document? GetCurrentProjectContextDocument(VsShell.Document.DocumentEntryBase entry) {
@@ -1466,13 +1521,13 @@ namespace TabsManagerExtension.Controls {
 
             this.SyncActiveDocumentWithPrimaryTabItem();
 
-            Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => {
+            VsixThreadHelper.RunOnUiThread(Dispatcher, () => {
                 if (VsShell.TextEditor.TextEditorControlHelper.IsEditorActive()) {
                     Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", true);
                     _textEditorOverlayController.Show();
                     _textEditorOverlayController.Update();
                 }
-            }), DispatcherPriority.Background);
+            }, DispatcherPriority.Background);
         }
 
         private void RestoreToolWindows() {

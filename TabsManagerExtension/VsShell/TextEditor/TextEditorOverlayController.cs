@@ -90,7 +90,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
             if (overlayTargaet == null) {
                 // Редактор ещё не загружен — повторим позже
                 Helpers.Diagnostic.Logger.LogDebug("TextEditor not loaded yet, try later");
-                Dispatcher.CurrentDispatcher.BeginInvoke(new Action(UpdateState), DispatcherPriority.ApplicationIdle);
+                VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, UpdateState, DispatcherPriority.ApplicationIdle);
                 return;
             }
             

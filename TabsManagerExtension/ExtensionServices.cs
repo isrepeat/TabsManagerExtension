@@ -82,6 +82,7 @@ namespace TabsManagerExtension.Services {
             }
 
             ExtensionServices.Register(Services.TimeManagerService.Create());
+            ExtensionServices.Register(Services.ExtensionStatusService.Create());
 
             ExtensionServices.Register(VsShell.Services.VsSelectionEventsServiceBase<
                 VsShell.Services.VsIDEStateFlagsTrackerService

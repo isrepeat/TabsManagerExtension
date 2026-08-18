@@ -20,13 +20,19 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
     public sealed class VsSolutionEventsTrackerService :
         TabsManagerExtension.Services.SingletonServiceBase<VsSolutionEventsTrackerService>,
         TabsManagerExtension.Services.IExtensionService,
-        IVsSolutionEvents {
+        IVsSolutionEvents,
+        IVsSolutionLoadEvents {
 
         public event Action<_EventArgs.ProjectHierarchyChangedEventArgs>? ProjectLoaded;
         public event Action<_EventArgs.ProjectHierarchyChangedEventArgs>? ProjectUnloaded;
+        public event Action? BackgroundSolutionLoadCompleted;
+        public event Action? SolutionHierarchyActivity;
+
+        public bool IsBackgroundSolutionLoadCompleted { get; private set; }
 
         private IVsSolution? _vsSolution;
         private uint _cookie;
+        private uint _solutionLoadCookie;
 
         public VsSolutionEventsTrackerService() { }
 
@@ -46,6 +52,12 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             }
 
             ErrorHandler.ThrowOnFailure(_vsSolution.AdviseSolutionEvents(this, out _cookie));
+
+            if (_vsSolution is IVsSolution8 solution8) {
+                Guid eventsGuid = typeof(IVsSolutionLoadEvents).GUID;
+                ErrorHandler.ThrowOnFailure(solution8.AdviseSolutionEventsEx(ref eventsGuid, this, out _solutionLoadCookie));
+            }
+
             Helpers.Diagnostic.Logger.LogDebug("[VsSolutionEventsTrackerService] Initialized.");
         }
 
@@ -55,6 +67,11 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             if (_vsSolution != null && _cookie != 0) {
                 _vsSolution.UnadviseSolutionEvents(_cookie);
                 _cookie = 0;
+            }
+
+            if (_vsSolution != null && _solutionLoadCookie != 0) {
+                _vsSolution.UnadviseSolutionEvents(_solutionLoadCookie);
+                _solutionLoadCookie = 0;
             }
 
             ClearInstance();
@@ -101,6 +118,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     null, // oldHierarchyItemEntry отсутствует, т.к. проект не переходил из stubHierarchy, а сразу загружен в Solution.
                     newHierarchyItemEntry
                 ));
+                this.SolutionHierarchyActivity?.Invoke();
             }
             return VSConstants.S_OK;
         }
@@ -114,7 +132,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         }
 
         public int OnAfterLoadProject(IVsHierarchy pStubHierarchy, IVsHierarchy pRealHierarchy) {
-            // NOTE: Used OnAfterOpenProject instead.
+            this.SolutionHierarchyActivity?.Invoke();
             return VSConstants.S_OK;
         }
 
@@ -161,6 +179,41 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         }
 
         public int OnAfterCloseSolution(object pUnkReserved) {
+            this.IsBackgroundSolutionLoadCompleted = false;
+            return VSConstants.S_OK;
+        }
+
+        //
+        // IVsSolutionLoadEvents
+        //
+        public int OnBeforeOpenSolution(string pszSolutionFilename) {
+            this.IsBackgroundSolutionLoadCompleted = false;
+            return VSConstants.S_OK;
+        }
+
+        public int OnBeforeBackgroundSolutionLoadBegins() {
+            this.IsBackgroundSolutionLoadCompleted = false;
+            return VSConstants.S_OK;
+        }
+
+        public int OnQueryBackgroundLoadProjectBatch(out bool pfShouldDelayLoadToNextIdle) {
+            pfShouldDelayLoadToNextIdle = false;
+            return VSConstants.S_OK;
+        }
+
+        public int OnBeforeLoadProjectBatch(bool fIsBackgroundIdleBatch) {
+            return VSConstants.S_OK;
+        }
+
+        public int OnAfterLoadProjectBatch(bool fIsBackgroundIdleBatch) {
+            this.SolutionHierarchyActivity?.Invoke();
+            return VSConstants.S_OK;
+        }
+
+        public int OnAfterBackgroundSolutionLoadComplete() {
+            this.IsBackgroundSolutionLoadCompleted = true;
+            Helpers.Diagnostic.Logger.LogDebug("[VsSolutionEventsTrackerService] Background solution load completed.");
+            this.BackgroundSolutionLoadCompleted?.Invoke();
             return VSConstants.S_OK;
         }
     }

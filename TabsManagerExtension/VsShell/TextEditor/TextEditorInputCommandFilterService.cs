@@ -136,9 +136,9 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
         private void OnDocumentActivatedExternally(_EventArgs.DocumentNavigationEventArgs e) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => {
+            VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, () => {
                 this.InstallToActiveEditor();
-            }), DispatcherPriority.Background);
+            }, DispatcherPriority.Background);
         }
 
 
@@ -146,9 +146,9 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             // Используем диспетчер чтобы дать время IVsTextView стать активным.
-            Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => {
+            VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, () => {
                 this.InstallToActiveEditor();
-            }), DispatcherPriority.Background);
+            }, DispatcherPriority.Background);
         }
 
 

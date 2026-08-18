@@ -91,6 +91,14 @@ namespace TabsManagerExtension.VsShell.Services {
             return _contextStateMap.TryGetValue(contextGuid, out bool isActive) && isActive;
         }
 
+        public void InvokeIfSolutionLoaded(System.Action<string> handler) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (this.IsContextActive(SolutionExistsGuid)) {
+                handler(this.GetCurrentSolutionName() ?? string.Empty);
+            }
+        }
+
         //
         // Internal logic
         //

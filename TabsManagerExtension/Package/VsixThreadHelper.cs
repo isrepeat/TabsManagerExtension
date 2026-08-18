@@ -31,7 +31,7 @@ namespace TabsManagerExtension {
         /// Можно безопасно использовать DTE, IVsSolution и т.д.
         /// </summary>
         public static void RunOnVsThread(Action action) {
-            ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
                 try {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     action();
@@ -45,7 +45,7 @@ namespace TabsManagerExtension {
         }
 
         public static void RunOnVsThread(Func<Task> asyncAction) {
-            ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
                 try {
                     await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     await asyncAction();
@@ -59,23 +59,46 @@ namespace TabsManagerExtension {
         }
 
         /// <summary>
-        /// Выполняет action на WPF UI Dispatcher потоке. Можно безопасно обновлять визуальные элементы.
+        /// Ставит action в очередь WPF Dispatcher без ожидания завершения (fire-and-forget).
+        /// Приоритет является частью семантики вызова, поэтому SwitchToMainThreadAsync здесь не эквивалентен.
         /// </summary>
         public static void RunOnUiThread(Action action, DispatcherPriority priority = DispatcherPriority.Background) {
-            Application.Current.Dispatcher.BeginInvoke(action, priority);
+            RunOnUiThread(Application.Current.Dispatcher, action, priority);
+        }
+
+        public static void RunOnUiThread(
+            Dispatcher dispatcher,
+            Action action,
+            DispatcherPriority priority = DispatcherPriority.Background) {
+
+#pragma warning disable VSTHRD001 // Намеренно используем очередь WPF Dispatcher с заданным приоритетом.
+            _ = dispatcher.BeginInvoke(
+                new Action(() => {
+                    try {
+                        action();
+                    }
+                    catch (Exception ex) {
+                        Helpers.Diagnostic.Logger.LogError($"[RunOnUiThread] action exception: {ex}");
+                        System.Diagnostics.Debugger.Break();
+                    }
+                }),
+                priority
+            );
+#pragma warning restore VSTHRD001
         }
 
         public static void RunOnUiThread(Func<Task> asyncAction, DispatcherPriority priority = DispatcherPriority.Background) {
-            Application.Current.Dispatcher.InvokeAsync(async () => {
+#pragma warning disable VSTHRD001 // Намеренно используем очередь WPF Dispatcher с заданным приоритетом.
+            _ = Application.Current.Dispatcher.InvokeAsync(async () => {
                 try {
                     await asyncAction();
                 }
                 catch (Exception ex) {
                     Helpers.Diagnostic.Logger.LogError($"[RunOnUiThread] asyncAction exception: {ex}");
                     System.Diagnostics.Debugger.Break();
-                    throw;
                 }
             }, priority);
+#pragma warning restore VSTHRD001
         }
     }
 }

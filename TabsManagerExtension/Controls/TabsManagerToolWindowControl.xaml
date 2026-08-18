@@ -136,7 +136,8 @@
                 <MenuItem Header="{Binding}"
                           Command="{Binding Command}"
                           CommandParameter="{Binding CommandParameterContext}"
-                          MouseEnter="ProjectContextMenuItem_MouseEnter"
+                          localBehaviours:MouseEnterCommandBehavior.Command="{Binding OnProjectContextMenuItemMouseEnterCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
+                          localBehaviours:MouseEnterCommandBehavior.CommandParameter="{Binding RelativeSource={RelativeSource Self}}"
                           >
                     <MenuItem.HeaderTemplate>
                         <DataTemplate>
@@ -164,16 +165,10 @@
                                            />
 
                                 <Button Grid.Column="2"
-                                        Margin="8,-3,-5,-3"
-                                        Padding="6,3"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=MenuItem}}"
-                                        FontFamily="Segoe MDL2 Assets"
-                                        Content="&#xE76C;"
-                                        ToolTip="Show transitive including files"
+                                        Style="{StaticResource MenuControl/ProjectContextIncludersButtonStyle}"
                                         IsEnabled="{Binding CommandParameterContext.ProjectEntry.IsLoaded}"
-                                        Click="ProjectContextIncludersButton_Click"
+                                        Command="{Binding OnProjectContextIncludersOpenCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
+                                        CommandParameter="{Binding RelativeSource={RelativeSource Self}}"
                                         />
                             </Grid>
                             <DataTemplate.Triggers>
@@ -203,7 +198,8 @@
                 <MenuItem Header="{Binding Header}"
                           Command="{Binding Command}"
                           CommandParameter="{Binding CommandParameterContext}"
-                          MouseEnter="ProjectContextMenuItem_MouseEnter">
+                          localBehaviours:MouseEnterCommandBehavior.Command="{Binding OnProjectContextMenuItemMouseEnterCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
+                          localBehaviours:MouseEnterCommandBehavior.CommandParameter="{Binding RelativeSource={RelativeSource Self}}">
                     <MenuItem.Style>
                         <Style TargetType="MenuItem" BasedOn="{StaticResource MenuControl/MenuItemCommandStyle}">
                             <Style.Triggers>
@@ -224,16 +220,10 @@
 
                                 <TextBlock Text="{Binding Header}"/>
                                 <Button Grid.Column="1"
-                                        Margin="8,-3,-5,-3"
-                                        Padding="6,3"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=MenuItem}}"
-                                        FontFamily="Segoe MDL2 Assets"
-                                        Content="&#xE76C;"
-                                        ToolTip="Show transitive including files"
+                                        Style="{StaticResource MenuControl/ProjectContextIncludersButtonStyle}"
                                         IsEnabled="{Binding CommandParameterContext.CanSwitch}"
-                                        Click="ProjectContextIncludersButton_Click"
+                                        Command="{Binding OnProjectContextIncludersOpenCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
+                                        CommandParameter="{Binding RelativeSource={RelativeSource Self}}"
                                         />
                             </Grid>
                         </DataTemplate>
@@ -287,6 +277,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="24" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="auto" />
             <RowDefinition Height="auto" />
         </Grid.RowDefinitions>
 
@@ -377,6 +368,42 @@
                                             Title="Tabs: "
                                             ScaleFactor="{Binding ScaleFactorTabsCompactness, Mode=TwoWay}" 
                                             />
+
+        <!-- Стек длительных фоновых операций расширения -->
+        <ItemsControl Grid.Row="3"
+                      ItemsSource="{Binding BackgroundOperations}"
+                      Margin="5,1,5,4">
+            <ItemsControl.Style>
+                <Style TargetType="ItemsControl">
+                    <Style.Triggers>
+                        <Trigger Property="HasItems" Value="False">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </ItemsControl.Style>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,1,0,2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="auto" />
+                            <RowDefinition Height="4" />
+                        </Grid.RowDefinitions>
+                        <TextBlock FontSize="10"
+                                   TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding Title, Mode=OneWay}" />
+                            <Run Text=": " />
+                            <Run Text="{Binding Stage, Mode=OneWay}" />
+                        </TextBlock>
+                        <ProgressBar Grid.Row="1"
+                                     Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding Progress, Mode=OneWay}"
+                                     Height="3" />
+                    </Grid>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
 
         <!-- VirtualMenuControl с настраиваемым контентом -->
         <localControls:VirtualMenuControl x:Name="VirtualMenuControl"

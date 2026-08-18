@@ -71,24 +71,21 @@ namespace TabsManagerExtension {
 #if ENABLE_EARLY_PACKAGE_LOAD_HACK
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
 #endif
+            this.RestoreCustomTabsImmediately();
             await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
             this.ShowLoadedStatusAfterShellBecomesIdle();
-            this.RestoreCustomTabsAfterShellBecomesIdle();
         }
 
-        private void RestoreCustomTabsAfterShellBecomesIdle() {
+        private void RestoreCustomTabsImmediately() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
             if (!Configuration.TabsManagerConfigurationService.AutoLoadCustomTabs) {
                 return;
             }
 
-            this.JoinableTaskFactory.RunAsync(async () => {
-                await Task.Delay(TimeSpan.FromSeconds(2), this.DisposalToken);
-                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
-
-                if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
-                    VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
-                }
-            }).FileAndForget("TabsManagerExtension/RestoreCustomTabs");
+            if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
+            }
         }
 
 

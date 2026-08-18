@@ -185,6 +185,9 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private string _lastLoadedSolutionName;
         private bool _analyzingInProcess = false;
 
+        public readonly Helpers.Events.Action<string> InitialAnalysisCompleted = new();
+        public bool HasInitialAnalysisCompleted { get; private set; }
+
         public SolutionHierarchyAnalyzerService() {
             this.ExternalIncludeRepresentationsTable = new SolutionHierarchyRepresentationsTable(_solutionProjects);
             this.SharedItemsRepresentationsTable = new SolutionHierarchyRepresentationsTable(_solutionProjects);
@@ -206,7 +209,14 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
+            // Не блокируем создание UI Tabs Manager первоначальным обходом большого solution.
+            // Запомненный SolutionLoaded будет обработан после возврата управления Dispatcher.
+            VsixThreadHelper.RunOnUiThread(
+                new Action(
+                    () => VsShell.Services.VsIDEStateFlagsTrackerService.Instance.InvokeIfSolutionLoaded(this.OnSolutionLoaded)
+                ),
+                DispatcherPriority.Background
+            );
 
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
@@ -305,12 +315,16 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             this.AnalyzeSolutionProjects();
             this.AnalyzeDocuments();
             this.AnalyzeExternalIncludes();
+            this.HasInitialAnalysisCompleted = true;
+            this.InitialAnalysisCompleted.Invoke(solutionName);
         }
 
         private void OnSolutionClosed(string solutionName) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnSolutionClosed()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            _lastLoadedSolutionName = null;
+            this.HasInitialAnalysisCompleted = false;
             _solutionProjects.ClearAndDispose();
         }
 

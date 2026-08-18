@@ -99,7 +99,7 @@ namespace TabsManagerExtension.VsShell.TextEditor {
 
             var buffer = viewHost.TextView.TextBuffer;
 
-            Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => {
+            VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, () => {
                 ThreadHelper.ThrowIfNotOnUIThread();
 
                 try {
@@ -122,7 +122,7 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                 catch (InvalidOperationException ex) {
                     System.Diagnostics.Debug.WriteLine($"[EditorControlHelper] SetEditorEditable failed: {ex.Message}");
                 }
-            }), DispatcherPriority.Background);
+            }, DispatcherPriority.Background);
         }
 
         /// <summary>

@@ -26,10 +26,14 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private SolutionSourceFileGraph _solutionSourceFileGraph = null!;
         private Helpers.DirectoryWatcher? _solutionDirWatcher;
         private DispatcherTimer _delayedFileChangeTimer = null!;
+        private DispatcherTimer _graphBuildQuietTimer = null!;
+        private DispatcherTimer _graphBuildMaxWaitTimer = null!;
 
         private readonly HashSet<Helpers.DirectoryChangedEventArgs> _pendingChangedFiles = new();
 
         private string? _lastLoadedSolutionName;
+        private string? _initialAnalysisCompletedSolutionName;
+        private bool _solutionHierarchyReady;
         private bool _buildingSolutionGraphInProcess = false;
         private bool _buildingProjectGraphInProcess = false;
         private int _msBuildRefreshQueued = 0;
@@ -37,6 +41,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private CancellationTokenSource? _graphBuildCancellation;
         private readonly object _includeParseCacheLock = new();
         private readonly Dictionary<string, IncludeParseCacheEntry> _includeParseCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private const string GraphBuildOperationKey = "IncludeDependencyGraph";
 
         private static readonly HashSet<string> _supportedCppExtensions = new(StringComparer.OrdinalIgnoreCase) {
             ".h", ".hh", ".hpp", ".hxx", ".inl", ".inc", ".ipp", ".tpp",
@@ -54,6 +60,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 typeof(VsShell.Services.VsIDEStateFlagsTrackerService),
                 typeof(VsShell.Solution.Services.VsSolutionEventsTrackerService),
                 typeof(VsShell.Solution.Services.SolutionHierarchyAnalyzerService),
+                typeof(TabsManagerExtension.Services.ExtensionStatusService),
             };
         }
 
@@ -70,6 +77,18 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             };
             _delayedFileChangeTimer.Tick += (_, _) => this.OnDelayedFileChangeTimerTick();
 
+            _graphBuildQuietTimer = new DispatcherTimer {
+                Interval = TimeSpan.FromSeconds(2)
+            };
+            // Запускаем граф после короткого периода без изменений hierarchy. Предельный таймер
+            // гарантирует старт даже для решений, которые продолжают генерировать фоновые события.
+            _graphBuildQuietTimer.Tick += (_, _) => this.TryStartScheduledGraphBuild("hierarchy quiet period");
+
+            _graphBuildMaxWaitTimer = new DispatcherTimer {
+                Interval = TimeSpan.FromSeconds(15)
+            };
+            _graphBuildMaxWaitTimer.Tick += (_, _) => this.TryStartScheduledGraphBuild("maximum wait timeout");
+
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
@@ -77,6 +96,12 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded += this.OnProjectLoaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded += this.OnProjectUnloaded;
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.BackgroundSolutionLoadCompleted += this.OnBackgroundSolutionLoadCompleted;
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionHierarchyActivity += this.OnSolutionHierarchyActivity;
+            VsShell.Project.ProjectHierarchyTracker.AnyHierarchyChanged += this.OnSolutionHierarchyActivity;
+            // Событие запоминает завершённый первичный снимок и сразу вызывает позднего подписчика.
+            VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.Add(this.OnInitialHierarchyAnalysisCompleted);
+            VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.InvokeForLastHandlerIfTriggered();
 
             Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Initialized.");
         }
@@ -87,6 +112,10 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             _isShuttingDown = true;
             this.ClearAnalysisState();
 
+            VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.Remove(this.OnInitialHierarchyAnalysisCompleted);
+            VsShell.Project.ProjectHierarchyTracker.AnyHierarchyChanged -= this.OnSolutionHierarchyActivity;
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionHierarchyActivity -= this.OnSolutionHierarchyActivity;
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.BackgroundSolutionLoadCompleted -= this.OnBackgroundSolutionLoadCompleted;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded -= this.OnProjectUnloaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded -= this.OnProjectLoaded;
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Remove(this.OnSolutionClosed);
@@ -102,6 +131,31 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         // ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
         public bool IsReady() {
             return _solutionSourceFileGraph != null && _buildingSolutionGraphInProcess == false && _buildingProjectGraphInProcess == false;
+        }
+
+        private bool CanStartGraphBuild() {
+            return
+                !_isShuttingDown &&
+                !string.IsNullOrEmpty(_lastLoadedSolutionName) &&
+                !_buildingSolutionGraphInProcess &&
+                !_buildingProjectGraphInProcess &&
+                _solutionSourceFileGraph == null;
+        }
+
+        private bool StartGraphBuild() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (!this.CanStartGraphBuild()) {
+                return false;
+            }
+
+            _graphBuildQuietTimer.Stop();
+            _graphBuildMaxWaitTimer.Stop();
+            _buildingSolutionGraphInProcess = true;
+            this.ReportGraphProgress("Preparing", 1);
+            Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Graph build requested.");
+            VsixThreadHelper.RunOnVsThread(this.BuildSolutionGraphAsync);
+            return true;
         }
 
 
@@ -283,8 +337,24 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 return;
             }
             _lastLoadedSolutionName = solutionName;
+            _solutionHierarchyReady = false;
+            // До публикации нового графа зависимые UI-функции считаются неготовыми.
+            TabsManagerExtension.Services.ExtensionStatusService.Instance.SetFeatureReady(
+                TabsManagerExtension.Services.ExtensionStatusService.IncludeGraphFeature,
+                false
+            );
 
-            VsixThreadHelper.RunOnVsThread(this.BuildSolutionGraphAsync);
+            this.ReportGraphProgress("Waiting for projects to load", 0);
+            Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Waiting for initial solution hierarchy analysis.");
+
+            if (string.Equals(
+                _initialAnalysisCompletedSolutionName,
+                solutionName,
+                StringComparison.OrdinalIgnoreCase)) {
+
+                _solutionHierarchyReady = true;
+                this.ScheduleGraphBuildAfterHierarchySettles();
+            }
         }
 
 
@@ -295,7 +365,79 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             // Сбрасываем имя вместе с графом. Без этого повторное открытие того же .sln считалось
             // дубликатом SolutionLoaded и оставляло SourceFile со ссылками на уже disposed-проекты.
             _lastLoadedSolutionName = null;
+            _initialAnalysisCompletedSolutionName = null;
+            _solutionHierarchyReady = false;
             this.ClearAnalysisState();
+            TabsManagerExtension.Services.ExtensionStatusService.Instance.SetFeatureReady(
+                TabsManagerExtension.Services.ExtensionStatusService.IncludeGraphFeature,
+                false
+            );
+
+            TabsManagerExtension.Services.ExtensionStatusService.Instance.RemoveOperation(GraphBuildOperationKey);
+        }
+
+        private void OnBackgroundSolutionLoadCompleted() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (string.IsNullOrEmpty(_lastLoadedSolutionName) || _solutionSourceFileGraph != null) {
+                return;
+            }
+
+            if (!_solutionHierarchyReady) {
+                return;
+            }
+
+            this.ScheduleGraphBuildAfterHierarchySettles();
+        }
+
+        private void OnInitialHierarchyAnalysisCompleted(string solutionName) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            _initialAnalysisCompletedSolutionName = solutionName;
+
+            if (string.IsNullOrEmpty(_lastLoadedSolutionName) ||
+                !string.Equals(solutionName, _lastLoadedSolutionName, StringComparison.OrdinalIgnoreCase) ||
+                _solutionSourceFileGraph != null) {
+
+                return;
+            }
+
+            _solutionHierarchyReady = true;
+            this.ScheduleGraphBuildAfterHierarchySettles();
+        }
+
+        private void ScheduleGraphBuildAfterHierarchySettles() {
+            // Любая последующая активность hierarchy перезапускает quiet timer, но не max wait timer.
+            this.ReportGraphProgress("Waiting for project hierarchy to settle", 0);
+            this.RestartGraphBuildQuietTimer();
+            _graphBuildMaxWaitTimer.Stop();
+            _graphBuildMaxWaitTimer.Start();
+        }
+
+        private void OnSolutionHierarchyActivity() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_solutionHierarchyReady && this.CanStartGraphBuild()) {
+                this.RestartGraphBuildQuietTimer();
+            }
+        }
+
+        private void RestartGraphBuildQuietTimer() {
+            _graphBuildQuietTimer.Stop();
+            _graphBuildQuietTimer.Start();
+        }
+
+        private void TryStartScheduledGraphBuild(string reason) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _graphBuildQuietTimer.Stop();
+            _graphBuildMaxWaitTimer.Stop();
+
+            if (!this.CanStartGraphBuild()) {
+                return;
+            }
+
+            Helpers.Diagnostic.Logger.LogDebug($"[IncludeDependencyAnalyzerService] Starting graph build after {reason}.");
+            this.StartGraphBuild();
         }
 
 
@@ -359,7 +501,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 return;
             }
 
-            _delayedFileChangeTimer.Dispatcher.BeginInvoke(
+            VsixThreadHelper.RunOnUiThread(
+                _delayedFileChangeTimer.Dispatcher,
                 new Action(
                     () => {
                         Interlocked.Exchange(ref _msBuildRefreshQueued, 0);
@@ -389,7 +532,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             // Событие об изменении файла приходит из фонового потока. DispatcherTimer можно безопасно
             // запускать только в UI-потоке, в котором он был создан. BeginInvoke передаёт перезапуск
             // таймера в очередь UI-потока; без этого два потока могли одновременно менять его состояние.
-            _delayedFileChangeTimer.Dispatcher.BeginInvoke(
+            VsixThreadHelper.RunOnUiThread(
+                _delayedFileChangeTimer.Dispatcher,
                 new Action(
                     () => {
                         if (_isShuttingDown) {
@@ -468,11 +612,14 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
                 var projectEvaluationInputs = MsBuildSolutionWatcher.CaptureProjectEvaluationInputs(dteProjects);
 
+                this.ReportGraphProgress("Collecting project files", 3);
                 var snapshotWatch = Stopwatch.StartNew();
                 var projectSnapshots = await this.CreateProjectSnapshotsAsync(loadedProjectNodes, cancellationToken);
                 snapshotWatch.Stop();
 
                 var graphWatch = Stopwatch.StartNew();
+                this.ReportGraphProgress("Building include graph", 25);
+                // Парсинг файлов и построение рёбер не обращаются к DTE и выполняются вне UI-потока.
                 var buildResult = await Task.Run(
                     () => {
                         var watcher = new MsBuildSolutionWatcher(projectEvaluationInputs);
@@ -488,6 +635,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 cancellationToken.ThrowIfCancellationRequested();
                 buildResult.Watcher.AttachDteProjects(projectEvaluationInputs);
                 buildResult.Watcher.IncludeEnvironmentChanged += this.OnMsBuildIncludeEnvironmentChanged;
+                this.ReportGraphProgress("Publishing include graph", 98);
+                // Готовый watcher и граф публикуются вместе; только после этого открываем UI-функции.
                 _msBuildSolutionWatcher = buildResult.Watcher;
                 _solutionSourceFileGraph = buildResult.Graph;
                 unpublishedWatcher = null;
@@ -504,16 +653,26 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     $"source representations={sourceFileCount}, snapshot={snapshotWatch.ElapsedMilliseconds} ms, " +
                     $"background build={graphWatch.ElapsedMilliseconds} ms."
                 );
+                TabsManagerExtension.Services.ExtensionStatusService.Instance.SetFeatureReady(
+                    TabsManagerExtension.Services.ExtensionStatusService.IncludeGraphFeature,
+                    true
+                );
+
+                this.ReportGraphProgress("Ready", 100);
+                TabsManagerExtension.Services.ExtensionStatusService.Instance.RemoveOperation(GraphBuildOperationKey);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
                 unpublishedWatcher?.Dispose();
                 Helpers.Diagnostic.Logger.LogDebug("[IncludeDependencyAnalyzerService] Background graph build canceled.");
+                if (!_isShuttingDown) {
+                    TabsManagerExtension.Services.ExtensionStatusService.Instance.RemoveOperation(GraphBuildOperationKey);
+                }
             }
             catch (Exception ex) {
                 unpublishedWatcher?.Dispose();
                 Helpers.Diagnostic.Logger.LogError($"[BuildSolutionGraph] exception: {ex}");
                 this.ClearAnalysisState();
-                _lastLoadedSolutionName = null;
+                this.ReportGraphProgress("Failed — see Output for details", 100);
             }
             finally {
                 if (ReferenceEquals(_graphBuildCancellation, cancellation)) {
@@ -531,7 +690,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             var result = new List<ProjectFilesSnapshot>(loadedProjects.Count);
 
-            foreach (var loadedProject in loadedProjects) {
+            for (int projectIndex = 0; projectIndex < loadedProjects.Count; projectIndex++) {
+                var loadedProject = loadedProjects[projectIndex];
                 cancellationToken.ThrowIfCancellationRequested();
                 var filePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var stack = new Stack<EnvDTE.ProjectItem>();
@@ -571,6 +731,10 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                 }
 
                 result.Add(new ProjectFilesSnapshot(loadedProject, filePaths.ToList()));
+                double progress = loadedProjects.Count == 0
+                    ? 25
+                    : 3 + ((projectIndex + 1) * 22.0 / loadedProjects.Count);
+                this.ReportGraphProgress($"Collecting project files ({projectIndex + 1}/{loadedProjects.Count})", progress);
                 await Task.Yield();
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             }
@@ -584,11 +748,19 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             CancellationToken cancellationToken) {
 
             var graph = new SolutionSourceFileGraph(msBuildSolutionWatcher);
+            int totalFiles = projectSnapshots.Sum(snapshot => snapshot.FilePaths.Count);
+            int processedFiles = 0;
+            int progressReportInterval = Math.Max(25, totalFiles / 100);
             foreach (var projectSnapshot in projectSnapshots) {
                 foreach (string filePath in projectSnapshot.FilePaths) {
                     cancellationToken.ThrowIfCancellationRequested();
                     var sourceFile = new Document.SourceFile(filePath, projectSnapshot.LoadedProject);
                     graph.AddSourceFileWithIncludes(sourceFile, this.ExtractRawIncludes(filePath));
+                    processedFiles++;
+                    if (processedFiles % progressReportInterval == 0 || processedFiles == totalFiles) {
+                        double progress = totalFiles == 0 ? 95 : 25 + (processedFiles * 70.0 / totalFiles);
+                        this.ReportGraphProgress($"Building include graph ({processedFiles}/{totalFiles})", progress);
+                    }
                 }
             }
 
@@ -875,6 +1047,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
         private void ClearAnalysisState() {
             _delayedFileChangeTimer?.Stop();
+            _graphBuildQuietTimer?.Stop();
+            _graphBuildMaxWaitTimer?.Stop();
             _graphBuildCancellation?.Cancel();
 
             // DirectoryWatcher и MSBuild watcher работают в фоновых потоках. Сначала отписываемся,
@@ -899,6 +1073,15 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             lock (_pendingChangedFiles) {
                 _pendingChangedFiles.Clear();
             }
+        }
+
+        private void ReportGraphProgress(string stage, double progress) {
+            TabsManagerExtension.Services.ExtensionStatusService.Instance.ReportOperation(
+                GraphBuildOperationKey,
+                "Dependency graph",
+                stage,
+                progress
+            );
         }
 
         private sealed class ProjectFilesSnapshot {

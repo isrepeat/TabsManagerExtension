@@ -16,6 +16,8 @@ namespace TabsManagerExtension.VsShell.Project {
         IVsHierarchyEvents,
         IDisposable {
 
+        public static event Action? AnyHierarchyChanged;
+
         public Helpers.Events.Action<_EventArgs.ProjectHierarchyItemsChangedEventArgs>? ExternalDependenciesChanged = new();
         public Helpers.Events.Action<_EventArgs.ProjectHierarchyItemsChangedEventArgs>? SharedItemsChanged = new();
         public Helpers.Events.Action<_EventArgs.ProjectHierarchyItemsChangedEventArgs>? SourcesChanged = new();
@@ -94,6 +96,7 @@ namespace TabsManagerExtension.VsShell.Project {
         //
         public int OnItemAdded(uint itemIdParent, uint itemIdSiblingPrev, uint itemIdAdded) {
             Helpers.Diagnostic.Logger.LogDebug($"[Watcher] OnItemAdded: parent={itemIdParent}, added={itemIdAdded}");
+            AnyHierarchyChanged?.Invoke();
             _delayedEventsHandler.Schedule();
             return VSConstants.S_OK;
         }
@@ -105,6 +108,7 @@ namespace TabsManagerExtension.VsShell.Project {
 
         public int OnItemDeleted(uint itemId) {
             Helpers.Diagnostic.Logger.LogDebug($"[Watcher] OnItemDeleted: {itemId}");
+            AnyHierarchyChanged?.Invoke();
             _delayedEventsHandler.Schedule();
             return VSConstants.S_OK;
         }
@@ -119,6 +123,7 @@ namespace TabsManagerExtension.VsShell.Project {
         // это связано с тем что некоторые элемнеты получают статус SharedItems.
         public int OnInvalidateItems(uint itemIdParent) {
             Helpers.Diagnostic.Logger.LogDebug($"[Watcher] OnInvalidateItems: parent={itemIdParent}");
+            AnyHierarchyChanged?.Invoke();
            //Console.Beep(frequency: 1000, duration: 150);
             _delayedEventsHandler.Schedule();
             return VSConstants.S_OK;

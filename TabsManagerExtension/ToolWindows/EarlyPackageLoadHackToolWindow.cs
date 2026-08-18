@@ -58,7 +58,7 @@ namespace TabsManagerExtension.ToolWindows {
             _package = package ?? throw new ArgumentNullException(nameof(package));
 
 #if OLD_LOGIC
-            ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
+            _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
                 var dte = await _package.GetServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE80.DTE2;
@@ -158,7 +158,7 @@ namespace TabsManagerExtension.ToolWindows {
             });
 #else
             if (sender is DependencyObject d) {
-                d.Dispatcher.BeginInvoke(new Action(() => {
+                VsixThreadHelper.RunOnUiThread(d.Dispatcher, () => {
                     // Hide as soon as possible.
                     var _toolWindowWin32Controller = Helpers.Win32.WindowWin32Controller.TryCreateFromToolWindow(this);
                     if (_toolWindowWin32Controller != null) {
@@ -166,7 +166,7 @@ namespace TabsManagerExtension.ToolWindows {
                     }
 
                     // Update window position to be placed in corner of IDE.
-                    ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
+                    _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
                         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
                         var ideRectInfo = await this.GetRightCornerIdeRectInfoAsync();
@@ -181,7 +181,7 @@ namespace TabsManagerExtension.ToolWindows {
                                 );
                         }
                     });
-                }), DispatcherPriority.Loaded);
+                }, DispatcherPriority.Loaded);
             }
 #endif
         }

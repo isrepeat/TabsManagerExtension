@@ -63,6 +63,8 @@ namespace TabsManagerExtension {
         private WeakReference<Decorator>? _currentTabHost;
         private WeakReference<UIElement>? _lastInjectedContent;
         private string? _documentTabsLayoutBeforeCustomTabs;
+        private DispatcherTimer? _customTabsInjectionRetryTimer;
+        private int _customTabsInjectionRetryCount;
 
         private VsixVisualTreeHelper() {
         }
@@ -252,18 +254,27 @@ namespace TabsManagerExtension {
                     this.IsCustomTabsEnabled = true;
                     this.EnsureStandardDocumentTabsOnLeft();
 
+                    if (string.Equals(_documentTabsLayoutBeforeCustomTabs, "left", StringComparison.OrdinalIgnoreCase)) {
+                        if (!this.UpdateCustomTabsHost(true)) {
+                            this.ScheduleCustomTabsInjectionRetry();
+                        }
+                        return;
+                    }
+
                     // Смена положения стандартных вкладок заставляет Visual Studio удалить старую область
-                    // PART_TabListHost и создать новую. ApplicationIdle откладывает наш код до завершения
-                    // этой перестройки, чтобы контрол Tabs Manager был вставлен уже в новую область.
-                    Application.Current.Dispatcher.BeginInvoke(
+                    // PART_TabListHost и создать новую. Приоритет Loaded позволяет дождаться применения
+                    // нового layout, не зависая до ApplicationIdle на загруженном UI-потоке.
+                    VsixThreadHelper.RunOnUiThread(
                         new Action(
                             () => {
                                 if (this.IsCustomTabsEnabled) {
-                                    this.UpdateCustomTabsHost(true);
+                                    if (!this.UpdateCustomTabsHost(true)) {
+                                        this.ScheduleCustomTabsInjectionRetry();
+                                    }
                                 }
                             }
                         ),
-                        DispatcherPriority.ApplicationIdle
+                        DispatcherPriority.Loaded
                     );
 
                     return;
@@ -274,6 +285,7 @@ namespace TabsManagerExtension {
             }
 
             this.IsCustomTabsEnabled = false;
+            _customTabsInjectionRetryTimer?.Stop();
             // Сначала убираем Tabs Manager и возвращаем стандартные вкладки в текущую область.
             // После этого восстанавливаем их прежнее положение; Visual Studio при этом может удалить
             // текущую область вкладок и создать её заново.
@@ -289,17 +301,17 @@ namespace TabsManagerExtension {
             }
         }
 
-        private void UpdateCustomTabsHost(bool enable) {
+        private bool UpdateCustomTabsHost(bool enable) {
 
             var mainWindow = Application.Current.MainWindow;
             if (mainWindow == null) {
-                return;
+                return false;
             }
 
             var tabHost = Helpers.VisualTree.FindElementByName(mainWindow, "PART_TabListHost") as Decorator;
             if (tabHost == null) {
                 Helpers.Diagnostic.Logger.LogWarning("PART_TabListHost not found");
-                return;
+                return false;
             }
 
             // Если Decorator пересоздан — сбросим оригинальный контент
@@ -310,7 +322,7 @@ namespace TabsManagerExtension {
 
             if (enable) {
                 if (tabHost.Child is Controls.TabsManagerToolWindowControl) {
-                    return; // Уже вставлено
+                    return true; // Уже вставлено
                 }
 
                 //Services.ExtensionServices.Initialize();
@@ -333,6 +345,29 @@ namespace TabsManagerExtension {
                     //Services.ExtensionServices.RequestShutdown();
                 }
             }
+
+            return true;
+        }
+
+        private void ScheduleCustomTabsInjectionRetry() {
+            if (_customTabsInjectionRetryTimer == null) {
+                _customTabsInjectionRetryTimer = new DispatcherTimer(DispatcherPriority.Loaded) {
+                    Interval = TimeSpan.FromMilliseconds(100)
+                };
+                _customTabsInjectionRetryTimer.Tick += (_, _) => {
+                    _customTabsInjectionRetryCount++;
+                    if (!this.IsCustomTabsEnabled ||
+                        this.UpdateCustomTabsHost(true) ||
+                        _customTabsInjectionRetryCount >= 50) {
+
+                        _customTabsInjectionRetryTimer.Stop();
+                    }
+                };
+            }
+
+            _customTabsInjectionRetryCount = 0;
+            _customTabsInjectionRetryTimer.Stop();
+            _customTabsInjectionRetryTimer.Start();
         }
 
         /// <summary>
@@ -349,11 +384,11 @@ namespace TabsManagerExtension {
 
             Helpers.Diagnostic.Logger.LogDebug("TabsManagerToolWindowControl.Unloaded — re-evaluating state...");
 
-            Application.Current.Dispatcher.BeginInvoke(new Action(() => {
+            VsixThreadHelper.RunOnUiThread(() => {
                 if (_isCustomTabsEnabled) {
                     this.ToggleCustomTabs(true); // повторно инжектим
                 }
-            }), DispatcherPriority.Background);
+            }, DispatcherPriority.Background);
         }
     }
 }
