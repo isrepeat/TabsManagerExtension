@@ -106,7 +106,7 @@ namespace TabsManagerExtension.Controls {
         private EnvDTE.DocumentEvents _documentEvents;
         private EnvDTE.SolutionEvents _solutionEvents;
 
-        private DispatcherTimer _tabsManagerStateTimer;
+        private DispatcherTimer? _tabsManagerStateTimer;
         private FileSystemWatcher _fileWatcher;
         private bool _isRestoringToolWindows;
         private bool _isSolutionClosing;
@@ -178,6 +178,7 @@ namespace TabsManagerExtension.Controls {
             this.UninitializeTabItemsSelectionCoordinator();
             this.UninitializeVsShellTrackers();
             this.UninitializeFileWatcher();
+            this.UninitializeBackgroundRoutine();
             this.UninitializeDTE();
 
             Services.ExtensionServices.EndUsage();
@@ -385,7 +386,7 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void UninitializeTabItemsSelectionCoordinator() {
-            _textEditorOverlayController.Hide();
+            _textEditorOverlayController.Dispose();
         }
 
 
@@ -394,9 +395,19 @@ namespace TabsManagerExtension.Controls {
         //
         private void InitializeBackgroundRoutine() {
             _tabsManagerStateTimer = new DispatcherTimer();
-            _tabsManagerStateTimer.Interval = TimeSpan.FromMilliseconds(200);
+            _tabsManagerStateTimer.Interval = TimeSpan.FromSeconds(2);
             _tabsManagerStateTimer.Tick += this.TabsManagerStateTimerHandler;
             _tabsManagerStateTimer.Start();
+        }
+
+        private void UninitializeBackgroundRoutine() {
+            if (_tabsManagerStateTimer == null) {
+                return;
+            }
+
+            _tabsManagerStateTimer.Stop();
+            _tabsManagerStateTimer.Tick -= this.TabsManagerStateTimerHandler;
+            _tabsManagerStateTimer = null;
         }
 
 
@@ -487,8 +498,10 @@ namespace TabsManagerExtension.Controls {
             var addedOrExistTabItem = this.AddTabItemToAutoDeterminedGroupIfMissing(tabItem);
             addedOrExistTabItem.IsSelected = true;
 
-            this.UpdateWindowTabsInfo();
-            this.SaveOpenToolWindows();
+            if (tabItem is TabItemWindow) {
+                this.UpdateWindowTabsInfo();
+                this.SaveOpenToolWindows();
+            }
 
             _textEditorOverlayController.Update();
         }
@@ -715,12 +728,13 @@ namespace TabsManagerExtension.Controls {
             // Поэтому в foreach вызывай .ToList() у коллекций.
 
             // === [A] Обновление статуса сохранения документов ===
+            var openDocuments = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .ToDictionary(document => document.FullName, StringComparer.OrdinalIgnoreCase);
+
             foreach (var tabItemsGroup in this.SortedTabItemsGroups.ToList()) {
                 foreach (var tabItem in tabItemsGroup.Items.ToList()) {
-                    var document = PackageServices.Dte2.Documents.Cast<EnvDTE.Document>()
-                        .FirstOrDefault(d => d.FullName == tabItem.FullName);
-
-                    if (document != null) {
+                    if (openDocuments.TryGetValue(tabItem.FullName, out var document)) {
                         if (document.Saved) {
                             tabItem.Caption = tabItem.Caption.TrimEnd('*');
                         }
@@ -1811,14 +1825,24 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void UpdateWindowTabsInfo() {
-            this.ForEachTab<TabItemWindow>(tabItemWindow => {
-                ThreadHelper.ThrowIfNotOnUIThread();
-                try {
-                    var matchingWindow = PackageServices.Dte2.Windows
-                        .Cast<EnvDTE.Window>()
-                        .FirstOrDefault(w => VsShell.Document.ShellWindow.GetWindowId(w) == tabItemWindow.WindowId);
+            ThreadHelper.ThrowIfNotOnUIThread();
 
-                    if (matchingWindow != null && tabItemWindow.Caption != matchingWindow.Caption) {
+            // DTE.Windows — COM-коллекция, поэтому перечисляем её один раз и строим индекс.
+            // Иначе для каждой виртуальной вкладки пришлось бы заново обходить все окна Visual Studio.
+            var windowsById = PackageServices.Dte2.Windows
+                .Cast<EnvDTE.Window>()
+                .Select(window => new {
+                    Window = window,
+                    Id = VsShell.Document.ShellWindow.GetWindowId(window)
+                })
+                .Where(entry => !string.IsNullOrEmpty(entry.Id))
+                .GroupBy(entry => entry.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().Window, StringComparer.OrdinalIgnoreCase);
+
+            this.ForEachTab<TabItemWindow>(tabItemWindow => {
+                try {
+                    // По стабильному WindowId находим актуальное окно и переносим изменившийся заголовок в UI.
+                    if (windowsById.TryGetValue(tabItemWindow.WindowId, out var matchingWindow) && tabItemWindow.Caption != matchingWindow.Caption) {
                         Helpers.Diagnostic.Logger.LogDebug($"Updating TabItemWindow caption: '{tabItemWindow.Caption}' → '{matchingWindow.Caption}'");
                         tabItemWindow.Caption = matchingWindow.Caption;
                         tabItemWindow.FullName = matchingWindow.Caption;

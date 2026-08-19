@@ -40,9 +40,21 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
         public void Show() {
             ThreadHelper.ThrowIfNotOnUIThread();
             this.EnsureCreated();
+
+            if (_overlayManager?.Overlay != null) {
+                _overlayManager.Overlay.Visibility = Visibility.Visible;
+            }
         }
 
         public void Hide() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_overlayManager?.Overlay != null) {
+                _overlayManager.Overlay.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        public void Dispose() {
             ThreadHelper.ThrowIfNotOnUIThread();
             this.EnsureDisposed();
         }

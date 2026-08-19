@@ -43,6 +43,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
         private TextEditorCommandFilter? _currentFilter;
 
         private bool _navigationToFileScheduled = false;
+        private bool _installScheduled;
 
         public TextEditorFileNavigationCommandFilterService() { }
 
@@ -92,17 +93,24 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
                 this.OnNavigatedToDocument?.Invoke(e);
             }
 
-            VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, () => {
-                this.InstallToActiveEditor();
-            }, DispatcherPriority.Background);
+            this.ScheduleInstallToActiveEditor();
         }
 
 
         private void OnVsWindowFrameActivated(IVsWindowFrame vsWindowFrame) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            // Используем диспетчер чтобы дать время IVsTextView стать активным.
+            this.ScheduleInstallToActiveEditor();
+        }
+
+        private void ScheduleInstallToActiveEditor() {
+            if (_installScheduled) {
+                return;
+            }
+
+            _installScheduled = true;
             VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, () => {
+                _installScheduled = false;
                 this.InstallToActiveEditor();
             }, DispatcherPriority.Background);
         }

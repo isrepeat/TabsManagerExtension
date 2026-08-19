@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Text;
 using TabsManagerExtension.State.TextEditor;
 
 
@@ -44,6 +45,8 @@ namespace TabsManagerExtension.Controls {
         public ObservableCollection<State.TextEditor.AnchorPoint> Anchors { get; } = new();
 
         private State.TextEditor.AnchorPoint? _selectedAnchor;
+        private ITextBuffer? _loadedTextBuffer;
+        private int _loadedSnapshotVersion = -1;
         public State.TextEditor.AnchorPoint? SelectedAnchor {
             get => _selectedAnchor;
             set {
@@ -97,21 +100,28 @@ namespace TabsManagerExtension.Controls {
         public void LoadAnchorsFromActiveDocument() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            this.Anchors.Clear();
-
-            if (PackageServices.Dte2?.ActiveDocument?.Object("TextDocument") is not EnvDTE.TextDocument textDoc) {
+            // Берём текст напрямую из буфера редактора, чтобы не читать документ построчно через медленный DTE/COM API.
+            var viewHost = VsShell.TextEditor.TextEditorControlHelper.TryGetActiveViewHost();
+            var snapshot = viewHost?.TextView.TextSnapshot;
+            if (snapshot == null) {
                 return;
             }
 
-            var point = textDoc.StartPoint.CreateEditPoint();
-            var lines = new List<string>();
-
-            for (int i = 1; i <= textDoc.EndPoint.Line; i++) {
-                lines.Add(point.GetLines(i, i + 1));
+            // При возврате из Output активируется тот же snapshot — повторный разбор в этом случае не нужен.
+            if (ReferenceEquals(_loadedTextBuffer, snapshot.TextBuffer) && _loadedSnapshotVersion == snapshot.Version.VersionNumber) {
+                return;
             }
+
+            _loadedTextBuffer = snapshot.TextBuffer;
+            _loadedSnapshotVersion = snapshot.Version.VersionNumber;
+
+            // Snapshot уже находится в памяти редактора, поэтому получение строк не выполняет COM-вызовов.
+            var lines = snapshot.Lines.Select(line => line.GetText()).ToList();
 
             var anchors = State.TextEditor.AnchorParser.ParseLinesWithContextWindow(lines);
             var final = State.TextEditor.AnchorParser.InsertSeparators(anchors);
+
+            this.Anchors.Clear();
 
             // Если this.Anchors.Count > 0 - будет отображена кнопка.
             foreach (var anchor in final) {

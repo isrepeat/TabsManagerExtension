@@ -39,7 +39,16 @@ namespace TabsManagerExtension.Configuration {
         public static void SetOpenToolWindowIds(IEnumerable<string> windowIds) {
             lock (_sync) {
                 var configuration = Load();
-                configuration.OpenToolWindowIds = windowIds.Where(id => Guid.TryParse(id, out _)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+                // В конфигурацию попадают только GUID окон без повторов, но в исходном порядке.
+                var newWindowIds = windowIds.Where(id => Guid.TryParse(id, out _)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+                // Метод вызывается из UI-событий: не перезаписываем JSON, если набор окон не изменился.
+                if (configuration.OpenToolWindowIds.SequenceEqual(newWindowIds, StringComparer.OrdinalIgnoreCase)) {
+                    return;
+                }
+
+                configuration.OpenToolWindowIds = newWindowIds;
                 Save(configuration);
             }
         }
