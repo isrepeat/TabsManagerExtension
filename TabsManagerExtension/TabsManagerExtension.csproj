@@ -183,11 +183,10 @@
     <Reference Include="System.Xml" />
     <Reference Include="WindowsBase" />
   </ItemGroup>
-  <ItemGroup Condition=" '$(Configuration)' == 'Debug'">
-    <Analyzer Include="..\UtilityHelpersLib\CodeAnalyzer\obj\Debug\netstandard2.0\CodeAnalyzer.dll" />
-  </ItemGroup>
-  <ItemGroup Condition=" '$(Configuration)' == 'Release'">
-    <!--<Analyzer Include="..\CodeAnalyzer\obj\Debug\netstandard2.0\CodeAnalyzer.dll" />-->
+  <ItemGroup>
+    <ProjectReference Include="..\UtilityHelpersLib\CodeAnalyzer\CodeAnalyzer.csproj"
+                      ReferenceOutputAssembly="false" />
+    <Analyzer Include="..\UtilityHelpersLib\CodeAnalyzer\obj\$(Configuration)\netstandard2.0\CodeAnalyzer.dll" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json">
