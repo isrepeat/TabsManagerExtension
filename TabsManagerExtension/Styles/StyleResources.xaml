@@ -84,16 +84,65 @@
         <Setter Property="BorderThickness" Value="1"/>
     </Style>
 
-    <Style x:Key="MenuControl/ProjectContextIncludersButtonStyle" TargetType="Button" BasedOn="{StaticResource DarkPopupButtonStyle}">
-        <Setter Property="Margin" Value="8,-3,-5,-3" />
-        <Setter Property="Padding" Value="6,3" />
+    <!-- Приглушённая кнопка открытия второго уровня каскадного меню. -->
+    <Style x:Key="MenuControl/ProjectContextIncludersButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="22" />
+        <Setter Property="Height" Value="22" />
+        <Setter Property="Margin" Value="7,-2,-3,-2" />
+        <Setter Property="Padding" Value="0" />
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Foreground"
                 Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=MenuItem}}" />
-        <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-        <Setter Property="Content" Value="&#xE76C;" />
+        <Setter Property="Cursor" Value="Arrow" />
         <Setter Property="ToolTip" Value="Show transitive including files" />
+        <!-- Hidden сохраняет место кнопки, поэтому заголовок строки не смещается при наведении. -->
+        <Setter Property="Visibility" Value="Hidden" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="_Background"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="3">
+                        <Viewbox Width="16"
+                                 Height="16"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center">
+                            <Path x:Name="_CascadeGlyph"
+                                  Width="16"
+                                  Height="16"
+                                  Data="M 2,3 L 3,3 M 5,3 L 14,3 M 2,8 L 3,8 M 5,8 L 14,8 M 2,13 L 3,13 M 5,13 L 14,13"
+                                  Stroke="{TemplateBinding Foreground}"
+                                  StrokeThickness="1.25"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"
+                                  Opacity="0.48" />
+                        </Viewbox>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="_Background" Property="Background" Value="#343434" />
+                            <Setter TargetName="_CascadeGlyph" Property="Opacity" Value="0.72" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="_Background" Property="Background" Value="#3A3A3A" />
+                            <Setter TargetName="_CascadeGlyph" Property="Opacity" Value="0.82" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="_CascadeGlyph" Property="Opacity" Value="0.24" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsHighlighted, RelativeSource={RelativeSource AncestorType=MenuItem}}"
+                         Value="True">
+                <Setter Property="Visibility" Value="Visible" />
+            </DataTrigger>
+        </Style.Triggers>
     </Style>
     
     
