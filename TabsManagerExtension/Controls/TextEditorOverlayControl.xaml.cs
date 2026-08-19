@@ -45,8 +45,27 @@ namespace TabsManagerExtension.Controls {
         public ObservableCollection<State.TextEditor.AnchorPoint> Anchors { get; } = new();
 
         private State.TextEditor.AnchorPoint? _selectedAnchor;
+        private ITextSnapshot? _activeSnapshot;
         private ITextBuffer? _loadedTextBuffer;
         private int _loadedSnapshotVersion = -1;
+        private bool _isAnchorListExpanded;
+        private readonly Dictionary<ITextBuffer, AnchorSnapshotCache> _anchorCache = new();
+
+        private sealed class AnchorSnapshotCache {
+            public int Version { get; }
+            public bool HasAnchors { get; }
+            public IReadOnlyList<State.TextEditor.AnchorPoint>? ParsedAnchors { get; }
+
+            public AnchorSnapshotCache(
+                int version,
+                bool hasAnchors,
+                IReadOnlyList<State.TextEditor.AnchorPoint>? parsedAnchors
+                ) {
+                this.Version = version;
+                this.HasAnchors = hasAnchors;
+                this.ParsedAnchors = parsedAnchors;
+            }
+        }
         public State.TextEditor.AnchorPoint? SelectedAnchor {
             get => _selectedAnchor;
             set {
@@ -78,7 +97,6 @@ namespace TabsManagerExtension.Controls {
             // поэтому значения из XAML не применяются гарантированно — устанавливаем явно в OnLoaded.
             this.IsHitTestVisible = true;
 
-            this.LoadAnchorsFromActiveDocument();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
@@ -89,13 +107,39 @@ namespace TabsManagerExtension.Controls {
 
         private void OnToggleAnchorList(object parameter) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnToggleAnchorList()");
-            this.IsAnchorListVisible.Value = !this.IsAnchorListVisible.Value;
 
-            if (this.IsAnchorListVisible.Value == false) {
+            if (_isAnchorListExpanded) {
+                _isAnchorListExpanded = false;
+                this.IsAnchorListVisible.Value = false;
                 this.SelectedAnchor = null;
+                return;
+            }
+
+            // Пока список закрыт, содержимое не пересчитывается при смене документа.
+            // Загружаем anchors лениво только перед фактическим раскрытием.
+            _isAnchorListExpanded = true;
+            if (_activeSnapshot != null) {
+                this.LoadAnchors(_activeSnapshot);
+            }
+            else {
+                this.LoadAnchorsFromActiveDocument();
             }
         }
 
+
+        public void OnActiveTextViewChanged(ITextSnapshot snapshot) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _activeSnapshot = snapshot;
+
+            if (!_isAnchorListExpanded) {
+                // Для закрытого списка достаточно быстро определить наличие хотя бы одного маркера.
+                // Полный разбор документа откладываем до раскрытия списка.
+                this.PrepareCollapsedState(snapshot);
+                return;
+            }
+
+            this.LoadAnchors(snapshot);
+        }
 
         public void LoadAnchorsFromActiveDocument() {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -104,8 +148,16 @@ namespace TabsManagerExtension.Controls {
             var viewHost = VsShell.TextEditor.TextEditorControlHelper.TryGetActiveViewHost();
             var snapshot = viewHost?.TextView.TextSnapshot;
             if (snapshot == null) {
+                this.ResetLoadedAnchors(showToggleButton: false);
                 return;
             }
+
+            _activeSnapshot = snapshot;
+            this.LoadAnchors(snapshot);
+        }
+
+        private void LoadAnchors(ITextSnapshot snapshot) {
+            ThreadHelper.ThrowIfNotOnUIThread();
 
             // При возврате из Output активируется тот же snapshot — повторный разбор в этом случае не нужен.
             if (ReferenceEquals(_loadedTextBuffer, snapshot.TextBuffer) && _loadedSnapshotVersion == snapshot.Version.VersionNumber) {
@@ -115,18 +167,71 @@ namespace TabsManagerExtension.Controls {
             _loadedTextBuffer = snapshot.TextBuffer;
             _loadedSnapshotVersion = snapshot.Version.VersionNumber;
 
+            if (_anchorCache.TryGetValue(snapshot.TextBuffer, out var cached) &&
+                cached.Version == snapshot.Version.VersionNumber &&
+                cached.ParsedAnchors != null) {
+
+                this.ApplyAnchors(cached.ParsedAnchors);
+                return;
+            }
+
             // Snapshot уже находится в памяти редактора, поэтому получение строк не выполняет COM-вызовов.
             var lines = snapshot.Lines.Select(line => line.GetText()).ToList();
 
             var anchors = State.TextEditor.AnchorParser.ParseLinesWithContextWindow(lines);
             var final = State.TextEditor.AnchorParser.InsertSeparators(anchors);
 
+            _anchorCache[snapshot.TextBuffer] = new AnchorSnapshotCache(
+                snapshot.Version.VersionNumber,
+                final.Count > 0,
+                final
+            );
+
+            this.ApplyAnchors(final);
+        }
+
+        private void ApplyAnchors(IReadOnlyList<State.TextEditor.AnchorPoint> anchors) {
+
             this.Anchors.Clear();
 
             // Если this.Anchors.Count > 0 - будет отображена кнопка.
-            foreach (var anchor in final) {
+            foreach (var anchor in anchors) {
                 this.Anchors.Add(anchor);
             }
+
+            bool hasAnchors = this.Anchors.Count > 0;
+            this.IsAnchorToggleButtonVisible.Value = hasAnchors;
+            this.IsAnchorListVisible.Value = _isAnchorListExpanded && hasAnchors;
+            if (!this.IsAnchorListVisible.Value) {
+                this.SelectedAnchor = null;
+            }
+        }
+
+        private void PrepareCollapsedState(ITextSnapshot snapshot) {
+            _loadedTextBuffer = null;
+            _loadedSnapshotVersion = -1;
+            this.SelectedAnchor = null;
+            this.Anchors.Clear();
+            this.IsAnchorListVisible.Value = false;
+
+            if (_anchorCache.TryGetValue(snapshot.TextBuffer, out var cached) && cached.Version == snapshot.Version.VersionNumber) {
+                this.IsAnchorToggleButtonVisible.Value = cached.HasAnchors;
+                return;
+            }
+
+            bool hasAnchors = snapshot.Lines.Any(line => line.GetText().TrimStart().StartsWith("// ░"));
+            _anchorCache[snapshot.TextBuffer] = new AnchorSnapshotCache(snapshot.Version.VersionNumber, hasAnchors, null);
+            this.IsAnchorToggleButtonVisible.Value = hasAnchors;
+        }
+
+        private void ResetLoadedAnchors(bool showToggleButton) {
+            _activeSnapshot = null;
+            _loadedTextBuffer = null;
+            _loadedSnapshotVersion = -1;
+            this.SelectedAnchor = null;
+            this.Anchors.Clear();
+            this.IsAnchorListVisible.Value = false;
+            this.IsAnchorToggleButtonVisible.Value = showToggleButton;
         }
 
         private void NavigateToLine(int lineNumber) {

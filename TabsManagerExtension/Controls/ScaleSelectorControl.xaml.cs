@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
@@ -57,6 +58,7 @@ namespace TabsManagerExtension.Controls {
 
             // Получаем ссылку на текстовое поле внутри ComboBox (editable part)
             _comboBoxTextBox = (TextBox)this.ScaleComboBox.Template.FindName("PART_EditableTextBox", this.ScaleComboBox);
+            this.SelectPresetForCurrentScale();
             this.UpdateComboBoxText();
         }
 
@@ -130,6 +132,18 @@ namespace TabsManagerExtension.Controls {
                     }
                 }
             }
+        }
+
+        private void SelectPresetForCurrentScale() {
+            this.ScaleComboBox.SelectedItem = this.ScaleComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item =>
+                    double.TryParse(
+                        item.Tag?.ToString(),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out double presetScale) &&
+                    Math.Abs(presetScale - this.ScaleFactor) <= 0.001);
         }
     }
 }

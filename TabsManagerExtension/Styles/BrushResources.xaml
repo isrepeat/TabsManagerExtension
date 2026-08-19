@@ -23,6 +23,7 @@
     <SolidColorBrush x:Key="AppTabItemsGroupForegroundBrush" Color="#FFaaaaaa"/>
     
     <!-- TabItem -->
-    <sys:Double x:Key="AppTabItemHeight">22</sys:Double>
+    <!-- Новые 100% соответствуют прежней высоте вкладок при масштабе 120%: 22 * 1.2 = 26.4. -->
+    <sys:Double x:Key="AppTabItemHeight">26.4</sys:Double>
     <sys:Double x:Key="AppTabItemFontSize">12</sys:Double>
 </ResourceDictionary>

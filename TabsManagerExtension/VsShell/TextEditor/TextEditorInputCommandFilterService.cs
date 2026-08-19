@@ -24,12 +24,17 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
         private static readonly VSConstants.VSStd2KCmdID[] _trackedStd2Commands = new[] {
             VSConstants.VSStd2KCmdID.TAB,
             VSConstants.VSStd2KCmdID.UP,
+            // VS отправляет Shift+Arrow отдельными extend-командами, а не обычными UP/DOWN.
+            VSConstants.VSStd2KCmdID.UP_EXT,
             VSConstants.VSStd2KCmdID.DOWN,
+            VSConstants.VSStd2KCmdID.DOWN_EXT,
             VSConstants.VSStd2KCmdID.LEFT,
             VSConstants.VSStd2KCmdID.RIGHT,
             VSConstants.VSStd2KCmdID.RETURN,
             VSConstants.VSStd2KCmdID.DELETE,
             VSConstants.VSStd2KCmdID.BACKSPACE,
+            // Space приходит как TYPECHAR, поэтому фильтру нужен исходный OLE-аргумент символа.
+            VSConstants.VSStd2KCmdID.TYPECHAR,
         };
 
         private static readonly VSConstants.VSStd97CmdID[] _trackedStd97Commands = new[] {
@@ -42,6 +47,8 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
 
         private readonly HashSet<FrameworkElement> _trackedElements = new();
         private FrameworkElement? _lastInputTarget;
+        // В edit mode команды должны идти во вкладки даже после активации editor frame.
+        private FrameworkElement? _forcedInputTarget;
 
         public TextEditorInputCommandFilterService() { }
 
@@ -111,8 +118,36 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             element.LostKeyboardFocus -= OnTargetLostFocus;
 
             if (ReferenceEquals(_lastInputTarget, element)) {
-                this.Disable();
                 _lastInputTarget = null;
+            }
+
+            if (ReferenceEquals(_forcedInputTarget, element)) {
+                _forcedInputTarget = null;
+            }
+
+            if (_forcedInputTarget == null && _lastInputTarget == null) {
+                this.Disable();
+            }
+        }
+
+
+        public void SetForcedInputTarget(FrameworkElement? element) {
+            if (element != null && !_trackedElements.Contains(element)) {
+                throw new InvalidOperationException("Forced input target must be registered first.");
+            }
+
+            // Forced target имеет приоритет над фактическим WPF-фокусом. Это позволяет оставить
+            // активным документ Visual Studio, но обрабатывать навигационные клавиши панелью вкладок.
+            _forcedInputTarget = element;
+            if (_currentFilter != null) {
+                _currentFilter.IsSpaceCommandEnabled = _forcedInputTarget != null;
+            }
+
+            if (_forcedInputTarget != null || _lastInputTarget?.IsKeyboardFocusWithin == true) {
+                this.Enable();
+            }
+            else {
+                this.Disable();
             }
         }
 
@@ -166,25 +201,32 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
 
 
         private void OnTargetLostFocus(object sender, RoutedEventArgs e) {
-            this.Disable();
             _lastInputTarget = null;
+
+            // Потеря обычного WPF-фокуса не выключает фильтр, пока действует edit mode.
+            if (_forcedInputTarget == null) {
+                this.Disable();
+            }
         }
 
 
-        private void OnCommandIntercepted(Guid cmdGroup, uint cmdId) {
-            if (_lastInputTarget == null || !_lastInputTarget.IsKeyboardFocusWithin) {
+        private void OnCommandIntercepted(Guid cmdGroup, uint cmdId, IntPtr inputArgument) {
+            // В edit mode используем принудительную цель; вне его перенаправляем ввод только
+            // действительно сфокусированному зарегистрированному контролу.
+            var inputTarget = _forcedInputTarget ?? _lastInputTarget;
+            if (inputTarget == null || (_forcedInputTarget == null && !inputTarget.IsKeyboardFocusWithin)) {
                 return;
             }
 
             if (_currentFilter != null) {
-                var key = _currentFilter.TryResolveKey(cmdGroup, cmdId);
+                var key = _currentFilter.TryResolveKey(cmdGroup, cmdId, inputArgument);
                 if (key.HasValue) {
-                    this.RedirectKeyInput(_lastInputTarget, key.Value);
+                    this.RedirectKeyInput(inputTarget, key.Value);
                 }
             }
         }
 
-        private void OnCommandPassedThrough(Guid cmdGroup, uint cmdId) {
+        private void OnCommandPassedThrough(Guid cmdGroup, uint cmdId, IntPtr inputArgument) {
             // ...
         }
 
@@ -211,6 +253,8 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             var filter = new TextEditorCommandFilter(_trackedStd2Commands, _trackedStd97Commands);
+            // TYPECHAR перехватывается только в edit mode, чтобы обычный ввод текста не затрагивался.
+            filter.IsSpaceCommandEnabled = _forcedInputTarget != null;
             int result = view.AddCommandFilter(filter, out IOleCommandTarget next);
 
             if (result == VSConstants.S_OK) {
@@ -220,6 +264,12 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
 
                 _currentFilter = filter;
                 _currentTextView = view;
+
+                // Новый editor view получает новый command filter; восстанавливаем его состояние
+                // после смены документа, не ожидая дополнительного события WPF-фокуса.
+                if (_forcedInputTarget != null || _lastInputTarget?.IsKeyboardFocusWithin == true) {
+                    _currentFilter.IsEnabled = true;
+                }
             }
             else {
                 Helpers.Diagnostic.Logger.LogWarning($"[TextEditorCommandFilterController] Не удалось установить фильтр. HRESULT = 0x{result:X8}");

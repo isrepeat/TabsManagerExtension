@@ -17,7 +17,7 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/TabsManagerExtension;component/Styles/StyleResources.xaml" />
+                <ResourceDictionary Source="../Styles/StyleResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <Style x:Key="CustomScaleSelectorControlStyle" TargetType="localControls:ScaleSelectorControl">
@@ -307,6 +307,7 @@
                                     <localControls:TabItemControl
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
+                                        IsEditMode="{Binding DataContext.IsTabEditMode, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                                         MouseEnter="InteractiveArea_MouseEnter"
                                         MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
@@ -324,6 +325,7 @@
                                     <localControls:TabItemControl
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
+                                        IsEditMode="{Binding DataContext.IsTabEditMode, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                                         MouseEnter="InteractiveArea_MouseEnter"
                                         MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
@@ -341,6 +343,7 @@
                                     <localControls:TabItemControl
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
+                                        IsEditMode="{Binding DataContext.IsTabEditMode, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                                         MouseEnter="InteractiveArea_MouseEnter"
                                         MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
@@ -363,11 +366,25 @@
         </Grid>
 
         <!-- Контейнер с выбором масштаба -->
-        <localControls:ScaleSelectorControl Grid.Row="2"
-                                            Style="{StaticResource CustomScaleSelectorControlStyle}"
-                                            Title="Tabs: "
-                                            ScaleFactor="{Binding ScaleFactorTabsCompactness, Mode=TwoWay}" 
-                                            />
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <localControls:ScaleSelectorControl Grid.Column="0"
+                                                Style="{StaticResource CustomScaleSelectorControlStyle}"
+                                                Title="Tabs: "
+                                                ScaleFactor="{Binding ScaleFactorTabsCompactness, Mode=TwoWay}"
+                                                />
+            <CheckBox Grid.Column="1"
+                      Margin="8,0,6,0"
+                      VerticalAlignment="Center"
+                      Content="Edit"
+                      ToolTip="Keyboard tab editing mode"
+                      IsChecked="{Binding IsTabEditMode, Mode=TwoWay}"
+                      />
+        </Grid>
 
         <!-- Стек длительных фоновых операций расширения -->
         <ItemsControl Grid.Row="3"

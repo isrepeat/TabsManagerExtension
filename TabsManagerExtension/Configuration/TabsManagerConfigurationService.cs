@@ -28,6 +28,14 @@ namespace TabsManagerExtension.Configuration {
             }
         }
 
+        public static double TabsScaleFactor {
+            get {
+                lock (_sync) {
+                    return NormalizeTabsScaleFactor(Load().TabsScaleFactor);
+                }
+            }
+        }
+
         public static void SetAutoLoadCustomTabs(bool value) {
             lock (_sync) {
                 var configuration = Load();
@@ -51,6 +59,25 @@ namespace TabsManagerExtension.Configuration {
                 configuration.OpenToolWindowIds = newWindowIds;
                 Save(configuration);
             }
+        }
+
+        public static void SetTabsScaleFactor(double value) {
+            lock (_sync) {
+                var configuration = Load();
+                double normalizedValue = NormalizeTabsScaleFactor(value);
+                if (Math.Abs(configuration.TabsScaleFactor - normalizedValue) <= 0.001) {
+                    return;
+                }
+
+                configuration.TabsScaleFactor = normalizedValue;
+                Save(configuration);
+            }
+        }
+
+        private static double NormalizeTabsScaleFactor(double value) {
+            return double.IsNaN(value) || double.IsInfinity(value)
+                ? 1.0
+                : Helpers.Math.Clamp(value, 0.5, 1.5);
         }
 
         private static TabsManagerConfiguration Load() {

@@ -14,7 +14,7 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/TabsManagerExtension;component/Styles/StyleResources.xaml"/>
+                <ResourceDictionary Source="../Styles/StyleResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
             <localConverters:BooleanToVisibilityConverter x:Key="InvertedBooleanToVisibilityConverter" IsInverted="True"/>

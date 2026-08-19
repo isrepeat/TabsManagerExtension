@@ -29,7 +29,8 @@
     <StartAction>Program</StartAction>
     <StartProgram Condition="'$(DevEnvDir)' != ''">$(DevEnvDir)devenv.exe</StartProgram>
     <!--<StartArguments>"$(SolutionDir)TESTS\TestIncludeSolution\TestIncludeSolution.sln" /RootSuffix Exp</StartArguments>-->
-    <StartArguments>"$(SolutionDir)..\Cpp\UtilityHelpersLib\UtilityHelpersLib.sln" /RootSuffix Exp</StartArguments>
+    <!--<StartArguments>"$(SolutionDir)..\Cpp\UtilityHelpersLib\UtilityHelpersLib.sln" /RootSuffix Exp</StartArguments>-->
+    <StartArguments>"$(SolutionDir)..\TabsManagerExtension - Copy\TabsManagerExtension.sln" /RootSuffix Exp</StartArguments>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -146,6 +147,8 @@
     <Compile Include="Controls\TabsManagerToolWindowControl.xaml.cs">
       <DependentUpon>TabsManagerToolWindowControl.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Controls\Navigation\TabNavigationController.cs" />
+    <Compile Include="Controls\Navigation\KeyboardTabNavigationExtension.cs" />
     <Compile Include="Controls\ScaleSelectorControl.xaml.cs">
       <DependentUpon>ScaleSelectorControl.xaml</DependentUpon>
     </Compile>

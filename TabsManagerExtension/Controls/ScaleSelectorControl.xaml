@@ -140,10 +140,9 @@
                   Style="{StaticResource DarkComboBoxStyle}"
                   ItemContainerStyle="{StaticResource DarkComboBoxItemStyle}"
                   >
-            <ComboBoxItem Content="85%" Tag="0.85" />
+            <ComboBoxItem Content="80%" Tag="0.8" />
             <ComboBoxItem Content="90%" Tag="0.9" />
-            <ComboBoxItem Content="95%" Tag="0.95" />
-            <ComboBoxItem Content="100%" Tag="1.0" IsSelected="True"/>
+            <ComboBoxItem Content="100%" Tag="1.0" />
             <ComboBoxItem Content="110%" Tag="1.1" />
             <ComboBoxItem Content="120%" Tag="1.2" />
         </ComboBox>

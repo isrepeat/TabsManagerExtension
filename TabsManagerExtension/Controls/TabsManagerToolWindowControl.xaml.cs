@@ -96,6 +96,27 @@ namespace TabsManagerExtension.Controls {
                     _scaleFactorTabsCompactness = value;
                     OnPropertyChanged();
                     this.ApplyScaleTabsCompactness();
+                    Configuration.TabsManagerConfigurationService.SetTabsScaleFactor(value);
+                }
+            }
+        }
+
+        private bool _isTabEditMode;
+        public bool IsTabEditMode {
+            get => _isTabEditMode;
+            set {
+                if (_isTabEditMode != value) {
+                    _isTabEditMode = value;
+                    OnPropertyChanged();
+
+                    if (value) {
+                        this.UpdateEditModeInputRedirect();
+                        this.Dispatcher.BeginInvoke(new Action(() => _keyboardTabNavigationExtension?.InitializeFocus()));
+                    }
+                    else {
+                        this.UpdateEditModeInputRedirect();
+                        _keyboardTabNavigationExtension?.ClearFocus();
+                    }
                 }
             }
         }
@@ -113,7 +134,10 @@ namespace TabsManagerExtension.Controls {
         private string? _openDocumentsLoadedForSolution;
 
         private Helpers.Collections.GroupsSelectionCoordinator<TabItemsGroupBase, TabItemBase> _tabItemsSelectionCoordinator;
+        private Navigation.TabNavigationController _tabNavigationController;
+        private Navigation.KeyboardTabNavigationExtension _keyboardTabNavigationExtension;
         private VsShell.TextEditor.Overlay.TextEditorOverlayController _textEditorOverlayController;
+        private readonly HashSet<TabItemControl> _tabItemControls = new();
 
 
         public ICommand OnPinTabItemCommand { get; }
@@ -129,9 +153,12 @@ namespace TabsManagerExtension.Controls {
 
         public TabsManagerToolWindowControl() {
             this.InitializeComponent();
+            this.ScaleFactorTabsCompactness = Configuration.TabsManagerConfigurationService.TabsScaleFactor;
             this.Loaded += this.OnLoaded;
             this.Unloaded += this.OnUnloaded;
             this.PreviewMouseDown += this.OnPreviewMouseDown;
+            this.PreviewKeyDown += this.OnPreviewKeyDown;
+            this.KeyDown += this.OnPreviewKeyDown;
             base.DataContext = this;
 
             this.OnPinTabItemCommand = new Helpers.RelayCommand<object>(this.OnPinTabItem);
@@ -155,6 +182,8 @@ namespace TabsManagerExtension.Controls {
         //
         private void OnLoaded(object sender, RoutedEventArgs e) {
             Services.ExtensionServices.BeginUsage();
+            VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
+            this.UpdateEditModeInputRedirect();
             Services.ExtensionStatusService.Instance.FeatureReadinessChanged += this.OnFeatureReadinessChanged;
             this.IsIncludeGraphReady = Services.ExtensionStatusService.Instance.IsFeatureReady(
                 Services.ExtensionStatusService.IncludeGraphFeature
@@ -165,6 +194,7 @@ namespace TabsManagerExtension.Controls {
             this.InitializeVsShellTrackers();
             this.InitializeTabItemsSelectionCoordinator();
             this.InitializeBackgroundRoutine();
+            this.ApplyScaleTabsCompactness();
 
             var hierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
             hierarchyAnalyzer.InitialAnalysisCompleted.Add(this.OnInitialHierarchyAnalysisCompleted);
@@ -172,6 +202,8 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.SetForcedInputTarget(null);
+            VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.RemoveTrackedInputElement(this);
             VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.Remove(this.OnInitialHierarchyAnalysisCompleted);
             Services.ExtensionStatusService.Instance.FeatureReadinessChanged -= this.OnFeatureReadinessChanged;
             this.SaveOpenToolWindows();
@@ -223,6 +255,35 @@ namespace TabsManagerExtension.Controls {
                 Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", true);
                 e.Handled = true;
             }
+        }
+
+        private void OnPreviewKeyDown(object sender, KeyEventArgs e) {
+            if (!this.IsTabEditMode) {
+                return;
+            }
+
+            // ListView может оставлять WPF-фокус на своём контейнере или на переключателе режима.
+            // Поэтому сначала используем фактический фокус, а затем сохранённую focused-вкладку edit mode.
+            var focusedElement = Keyboard.FocusedElement as DependencyObject;
+            var tabItemControl = focusedElement as TabItemControl;
+            tabItemControl ??= focusedElement == null ? null : Helpers.VisualTree.FindParentByType<TabItemControl>(focusedElement);
+            tabItemControl ??= this.FindTabItemControl(_keyboardTabNavigationExtension?.FocusedItem);
+
+            if (tabItemControl != null && this.HandleTabEditKey(tabItemControl, e.Key, Keyboard.Modifiers)) {
+                e.Handled = true;
+            }
+        }
+
+        private void UpdateEditModeInputRedirect() {
+            if (!this.IsLoaded) {
+                return;
+            }
+
+            // PART_TabListHost не становится отдельным command target. Пока активен edit mode,
+            // перехватываем навигационные команды в IVsTextView и направляем их в этот контрол.
+            VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.SetForcedInputTarget(
+                this.IsTabEditMode ? this : null
+            );
         }
 
 
@@ -382,10 +443,21 @@ namespace TabsManagerExtension.Controls {
             _tabItemsSelectionCoordinator.OnItemSelectionChanged = this.OnTabItemSelectionChanged;
             _tabItemsSelectionCoordinator.OnSelectionStateChanged = this.OnSelectionStateChanged;
 
+            _tabNavigationController = new Navigation.TabNavigationController(
+                _tabItemsSelectionCoordinator,
+                this.GetVisibleTabItems
+            );
+            _keyboardTabNavigationExtension = new Navigation.KeyboardTabNavigationExtension(_tabNavigationController);
+            _keyboardTabNavigationExtension.FocusedItemChanged += this.OnKeyboardFocusedTabItemChanged;
+            _keyboardTabNavigationExtension.InputTargetRestoreRequested += this.OnKeyboardInputTargetRestoreRequested;
+            _tabNavigationController.AddExtension(_keyboardTabNavigationExtension);
+
             _textEditorOverlayController = new VsShell.TextEditor.Overlay.TextEditorOverlayController(PackageServices.Dte2);
         }
 
         private void UninitializeTabItemsSelectionCoordinator() {
+            _keyboardTabNavigationExtension.FocusedItemChanged -= this.OnKeyboardFocusedTabItemChanged;
+            _keyboardTabNavigationExtension.InputTargetRestoreRequested -= this.OnKeyboardInputTargetRestoreRequested;
             _textEditorOverlayController.Dispose();
         }
 
@@ -436,7 +508,6 @@ namespace TabsManagerExtension.Controls {
                 this.AddTabItemToAutoDeterminedGroupIfMissing(tabItemDocument);
             }
 
-            _textEditorOverlayController.Update();
         }
 
 
@@ -469,41 +540,36 @@ namespace TabsManagerExtension.Controls {
         
 
         private void OnWindowActivated(EnvDTE.Window gotFocus, EnvDTE.Window lostFocus) {
-            using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnWindowActivated()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            // Log params:
-            Helpers.Diagnostic.Logger.LogParam($"gotFocus.Caption = {gotFocus?.Caption}");
-            Helpers.Diagnostic.Logger.LogParam($"lostFocus.Caption = {lostFocus?.Caption}");
-
             if (gotFocus == null) {
-                Helpers.Diagnostic.Logger.LogDebug($"gotFocus == null");
                 return;
             }
 
             var activatedShellWindow = new VsShell.Document.ShellWindow(gotFocus);
             if (!activatedShellWindow.IsTabWindow()) {
-                Helpers.Diagnostic.Logger.LogDebug($"Skip non tab window - \"{activatedShellWindow.Window.Caption}\"");
                 return;
             }
 
-            TabItemBase tabItem;
+            TabItemBase? tabItem;
             if (activatedShellWindow.Window.Document != null) {
-                tabItem = new TabItemDocument(activatedShellWindow.Window.Document);
+                // Для уже известного документа не создаём временный TabItemDocument и его
+                // служебное состояние при каждом переключении окна.
+                tabItem = this.FindTabItem(activatedShellWindow.Window.Document.FullName);
+                tabItem ??= this.AddTabItemToAutoDeterminedGroupIfMissing(new TabItemDocument(activatedShellWindow.Window.Document));
             }
             else {
-                tabItem = new TabItemWindow(activatedShellWindow);
+                tabItem = this.FindTabItem(activatedShellWindow.Window);
+                tabItem ??= this.AddTabItemToAutoDeterminedGroupIfMissing(new TabItemWindow(activatedShellWindow));
             }
 
-            var addedOrExistTabItem = this.AddTabItemToAutoDeterminedGroupIfMissing(tabItem);
-            addedOrExistTabItem.IsSelected = true;
+            tabItem.IsSelected = true;
 
             if (tabItem is TabItemWindow) {
                 this.UpdateWindowTabsInfo();
                 this.SaveOpenToolWindows();
             }
 
-            _textEditorOverlayController.Update();
         }
 
 
@@ -582,10 +648,7 @@ namespace TabsManagerExtension.Controls {
         // ░ VsShellTrackers 
         //
         private void OnDocumentActivatedExternally(VsShell._EventArgs.DocumentNavigationEventArgs e) {
-            using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnDocumentActivatedExternally()");
             ThreadHelper.ThrowIfNotOnUIThread();
-
-            Helpers.Diagnostic.Logger.LogParam($"documentFullName = {e.CurrentDocumentFullName}");
 
             var tabItem = this.FindTabItem(e.CurrentDocumentFullName);
             if (tabItem != null) {
@@ -596,7 +659,6 @@ namespace TabsManagerExtension.Controls {
 
 
         private void OnVsWindowFrameActivated(IVsWindowFrame vsWindowFrame) {
-            using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnVsWindowFrameActivated()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
             // NOTE: При запуске VS всегда активен последний документ сессии и
@@ -607,7 +669,6 @@ namespace TabsManagerExtension.Controls {
             //VSFM_MDIChild = 1, // Документное окно: занимает пространство текстового редактора, находится во вкладках
             //VSFM_Float = 2     // Плавающее окно: вытащено за пределы главного окна
             vsWindowFrame.GetProperty((int)__VSFPROPID.VSFPROPID_FrameMode, out var mode);
-            Helpers.Diagnostic.Logger.LogDebug($"vsWindowFrame.FrameMode = {(VSFRAMEMODE)(int)mode}");
 
             bool isMdiChild = mode != null && (VSFRAMEMODE)(int)mode == VSFRAMEMODE.VSFM_MdiChild;
             Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", isMdiChild);
@@ -621,7 +682,7 @@ namespace TabsManagerExtension.Controls {
                 if (docView is IVsCodeWindow codeWindow) {
                     if (codeWindow.GetPrimaryView(out var textView) == VSConstants.S_OK && textView != null) {
                         // Это полноценный редактор
-                        _textEditorOverlayController.Show();
+                        _textEditorOverlayController.ActivateEditorFrame(textView);
                         return;
                     }
                 }
@@ -691,31 +752,19 @@ namespace TabsManagerExtension.Controls {
         // ░ TabItemsSelectionCoordinator
         //
         private void OnTabItemSelectionChanged(TabItemsGroupBase group, TabItemBase tabItem, bool isSelected) {
-            Helpers.Diagnostic.Logger.LogDebug($"[{(isSelected ? "Selected" : "Unselected")}] {tabItem.Caption} in group {group.GroupName}");
-
             var isActivatedExtarnally = tabItem.Metadata.GetFlag("IsActivatedExternally");
             if (isActivatedExtarnally) {
                 tabItem.Metadata.SetFlag("IsActivatedExternally", false);
             }
 
             if (isSelected) {
-                // При внешней активации (например, из Solution Explorer) фокус остаётся вне редактора —
-                // в этом случае не трогаем его вручную, чтобы не сбивать пользовательский фокус.
-                if (!isActivatedExtarnally) {
-                    this.ActivatePrimaryTabItem();
-                }
+                // Mouse-навигация всегда сохраняет стандартную семантику, в том числе в edit mode.
+                _tabNavigationController.OnItemSelectionChanged(tabItem, isSelected, isActivatedExtarnally);
             }
         }
 
         private void OnSelectionStateChanged(Helpers.Enums.SelectionState selectionState) {
-            switch (selectionState) {
-                case Helpers.Enums.SelectionState.Single:
-                    this.ActivatePrimaryTabItem();
-                    break;
-
-                case Helpers.Enums.SelectionState.Multiple:
-                    break;
-            }
+            _tabNavigationController.OnSelectionStateChanged(selectionState);
         }
 
 
@@ -1496,7 +1545,14 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void ApplyScaleTabsCompactness() {
-            Helpers.BaseUserControlResourceHelper.UpdateDynamicResource(this, "AppTabItemHeight", this.ScaleFactorTabsCompactness * 22);
+            // Новая база 100% равна прежней высоте при 120%: 22 * 1.2 = 26.4.
+            Helpers.BaseUserControlResourceHelper.UpdateDynamicResource(this, "AppTabItemHeight", this.ScaleFactorTabsCompactness * 26.4);
+
+            // Вкладки материализуются позже родительского контрола и получают отдельные экземпляры
+            // ResourceDictionary, поэтому обновляем уже созданные элементы также напрямую.
+            foreach (var tabItemControl in _tabItemControls) {
+                this.ApplyScaleToTabItemControl(tabItemControl);
+            }
         }
 
 
@@ -1539,7 +1595,6 @@ namespace TabsManagerExtension.Controls {
                 if (VsShell.TextEditor.TextEditorControlHelper.IsEditorActive()) {
                     Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", true);
                     _textEditorOverlayController.Show();
-                    _textEditorOverlayController.Update();
                 }
             }, DispatcherPriority.Background);
         }
@@ -1869,6 +1924,88 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        // TODO:
+
+        internal void RegisterTabItemControl(TabItemControl control) {
+            _tabItemControls.Add(control);
+            this.ApplyScaleToTabItemControl(control);
+
+            if (ReferenceEquals(control.DataContext, _keyboardTabNavigationExtension?.FocusedItem)) {
+                control.IsEditFocused = true;
+            }
+        }
+
+        internal void UnregisterTabItemControl(TabItemControl control) {
+            _tabItemControls.Remove(control);
+        }
+
+        internal bool HandleTabEditKey(TabItemControl source, Key key, ModifierKeys modifiers) {
+            if (!this.IsTabEditMode) {
+                return false;
+            }
+
+            return _tabNavigationController.HandleKey(key, modifiers);
+        }
+
+        internal void HandleTabPointerNavigation(TabItemControl source) {
+            if (this.IsTabEditMode && source.DataContext is TabItemBase tabItem) {
+                _keyboardTabNavigationExtension.FocusItem(tabItem);
+
+                // Активация документа в результате клика может вернуть command target редактору
+                // уже после MouseUp. Планируем восстановление даже при клике по той же вкладке.
+                _keyboardTabNavigationExtension.RestoreInputTarget();
+            }
+        }
+
+        private List<TabItemBase> GetVisibleTabItems() {
+            return this.SortedTabItemsGroups
+                .SelectMany(group => group.Items)
+                .ToList();
+        }
+
+        private void OnKeyboardFocusedTabItemChanged(TabItemBase? tabItem) {
+            var previousControl = _tabItemControls.FirstOrDefault(control => control.IsEditFocused);
+            if (previousControl != null) {
+                previousControl.IsEditFocused = false;
+            }
+
+            var control = this.FindTabItemControl(tabItem);
+            if (control == null) {
+                return;
+            }
+
+            control.IsEditFocused = true;
+            control.BringIntoView();
+            this.FocusEditModeInputTarget();
+        }
+
+        private void OnKeyboardInputTargetRestoreRequested() {
+            this.Dispatcher.BeginInvoke(
+                new Action(this.FocusEditModeInputTarget),
+                DispatcherPriority.ContextIdle
+            );
+        }
+
+        private TabItemControl? FindTabItemControl(TabItemBase? tabItem) {
+            return tabItem == null
+                ? null
+                : _tabItemControls.FirstOrDefault(candidate => ReferenceEquals(candidate.DataContext, tabItem));
+        }
+
+        private void FocusEditModeInputTarget() {
+            // Контейнеры ListView намеренно нефокусируемые, чтобы обычная работа со вкладками
+            // не отбирала command target у редактора. В edit mode используем существующий
+            // FocusStealer как единую WPF-цель ввода для корневого PreviewKeyDown.
+            FocusManager.SetFocusedElement(this, this.FocusStealer);
+            this.FocusStealer.Focus();
+            Keyboard.Focus(this.FocusStealer);
+        }
+
+        private void ApplyScaleToTabItemControl(TabItemControl control) {
+            // Локальное значение имеет приоритет над дефолтом из подключённого BrushResources.xaml.
+            control.Resources["AppTabItemHeight"] = this.ScaleFactorTabsCompactness * 26.4;
+        }
+
         private void SyncActiveDocumentWithPrimaryTabItem() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -1938,11 +2075,8 @@ namespace TabsManagerExtension.Controls {
 
 
         private (TabItemDocument Item, TabItemsGroupBase Group)? FindTabItemWithGroup(EnvDTE.Document document) {
-            var result = this.FindTabItemWithGroup(new TabItemDocument(document));
-            if (result is { Item: TabItemDocument doc, Group: var group }) {
-                return (doc, group);
-            }
-            return null;
+            ThreadHelper.ThrowIfNotOnUIThread();
+            return this.FindTabItemWithGroup(document.FullName);
         }
 
         private (TabItemWindow Item, TabItemsGroupBase Group)? FindTabItemWithGroup(EnvDTE.Window window) {

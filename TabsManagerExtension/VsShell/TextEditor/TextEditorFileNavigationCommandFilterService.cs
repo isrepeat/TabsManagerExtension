@@ -116,12 +116,12 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
         }
 
 
-        private void OnCommandIntercepted(Guid cmdGroup, uint cmdId) {
+        private void OnCommandIntercepted(Guid cmdGroup, uint cmdId, IntPtr inputArgument) {
             // ...
         }
 
 
-        private void OnCommandPassedThrough(Guid cmdGroup, uint cmdId) {
+        private void OnCommandPassedThrough(Guid cmdGroup, uint cmdId, IntPtr inputArgument) {
             if (cmdGroup == VSConstants.VSStd2K) {
                 var std2kCmd = (VSConstants.VSStd2KCmdID)cmdId;
 

@@ -31,6 +31,30 @@ namespace TabsManagerExtension.Controls {
                 new PropertyMetadata(false));
 
 
+        public bool IsEditMode {
+            get { return (bool)this.GetValue(IsEditModeProperty); }
+            set { this.SetValue(IsEditModeProperty, value); }
+        }
+        public static readonly DependencyProperty IsEditModeProperty =
+            DependencyProperty.Register(
+                nameof(IsEditMode),
+                typeof(bool),
+                typeof(TabItemControl),
+                new PropertyMetadata(false));
+
+
+        public bool IsEditFocused {
+            get { return (bool)this.GetValue(IsEditFocusedProperty); }
+            set { this.SetValue(IsEditFocusedProperty, value); }
+        }
+        public static readonly DependencyProperty IsEditFocusedProperty =
+            DependencyProperty.Register(
+                nameof(IsEditFocused),
+                typeof(bool),
+                typeof(TabItemControl),
+                new PropertyMetadata(false));
+
+
         public DataTemplate ControlPanelPrimarySlotTemplate {
             get => (DataTemplate)this.GetValue(ControlPanelPrimarySlotTemplateProperty);
             set => this.SetValue(ControlPanelPrimarySlotTemplateProperty, value);
@@ -81,6 +105,11 @@ namespace TabsManagerExtension.Controls {
         public TabItemControl() {
             this.InitializeComponent();
             this.Loaded += this.OnLoaded;
+            this.Unloaded += this.OnUnloaded;
+            this.PreviewKeyDown += this.OnPreviewKeyDown;
+            // Внутренний CheckBox завершает MouseLeftButtonUp как handled. Подписка с
+            // handledEventsToo нужна, чтобы edit mode получил любой клик по вкладке.
+            this.AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler(this.OnMouseLeftButtonUp), true);
             this.MouseEnter += this.OnMouseEnter;
             this.MouseLeave += this.OnMouseLeave;
             this.MouseRightButtonUp += this.OnMouseRightButtonUpHandler;
@@ -88,6 +117,26 @@ namespace TabsManagerExtension.Controls {
 
         private void OnLoaded(object sender, RoutedEventArgs e) {
             this.FindAndCacheMenuControl();
+            Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.RegisterTabItemControl(this);
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs e) {
+            Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.UnregisterTabItemControl(this);
+        }
+
+        private void OnPreviewKeyDown(object sender, KeyEventArgs e) {
+            if (!this.IsEditMode) {
+                return;
+            }
+
+            var owner = Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this);
+            if (owner?.HandleTabEditKey(this, e.Key, Keyboard.Modifiers) == true) {
+                e.Handled = true;
+            }
+        }
+
+        private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
+            Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.HandleTabPointerNavigation(this);
         }
 
         private void OnMouseEnter(object sender, MouseEventArgs e) {

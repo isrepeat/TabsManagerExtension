@@ -41,7 +41,9 @@ namespace TabsManagerExtension.VsShell {
             return cmd switch {
                 VSConstants.VSStd2KCmdID.TAB => Key.Tab,
                 VSConstants.VSStd2KCmdID.UP => Key.Up,
+                VSConstants.VSStd2KCmdID.UP_EXT => Key.Up,
                 VSConstants.VSStd2KCmdID.DOWN => Key.Down,
+                VSConstants.VSStd2KCmdID.DOWN_EXT => Key.Down,
                 VSConstants.VSStd2KCmdID.LEFT => Key.Left,
                 VSConstants.VSStd2KCmdID.RIGHT => Key.Right,
                 VSConstants.VSStd2KCmdID.RETURN => Key.Enter,

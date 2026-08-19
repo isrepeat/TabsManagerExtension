@@ -9,12 +9,15 @@
                          xmlns:localStateDocument="clr-namespace:TabsManagerExtension.State.Document"
                          xmlns:helpers="clr-namespace:Helpers"
                          x:Name="__TabItemControl"
+                         Focusable="{Binding IsEditMode, ElementName=__TabItemControl}"
                          >
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/TabsManagerExtension;component/Styles/BrushResources.xaml"/>
+                <ResourceDictionary Source="../Styles/BrushResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
+
+            <localConverters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
 
 
             <Style x:Key="SelectableCheckBoxContainerStyle" TargetType="CheckBox">
@@ -109,6 +112,14 @@
                         </MultiDataTrigger.Conditions>
                         <Setter Property="BorderBrush" Value="{StaticResource AppAccentNonActiveMiddleBrush}" />
                     </MultiDataTrigger>
+
+                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=__TabItemControl}" Value="True">
+                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                    </DataTrigger>
+
+                    <DataTrigger Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True">
+                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                    </DataTrigger>
                 </Style.Triggers>
             </Style>
 
@@ -150,11 +161,22 @@
                   >
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0"
+                <!-- В режиме редактирования флажок только отражает текущее состояние selection-модели. -->
+                <CheckBox Grid.Column="0"
+                          Margin="6,0,0,0"
+                          VerticalAlignment="Center"
+                          Focusable="False"
+                          IsHitTestVisible="False"
+                          IsChecked="{Binding IsSelected, ElementName=__TabItemControl, Mode=OneWay}"
+                          Visibility="{Binding IsEditMode, ElementName=__TabItemControl, Converter={StaticResource BooleanToVisibilityConverter}}"
+                          />
+
+                <TextBlock Grid.Column="1"
                            Margin="5,0,5,0"
                            FontSize="{StaticResource AppTabItemFontSize}"
                            VerticalAlignment="Center"
@@ -163,7 +185,7 @@
                            Text="{Binding Title, ElementName=__TabItemControl}" 
                            />
                 <Grid Style="{StaticResource ControlPanelStyle}"
-                      Grid.Column="1"
+                      Grid.Column="2"
                       HorizontalAlignment="Right"
                       >
                     <StackPanel Orientation="Horizontal">

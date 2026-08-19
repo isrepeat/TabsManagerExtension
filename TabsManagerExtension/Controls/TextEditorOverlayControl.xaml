@@ -16,7 +16,7 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/TabsManagerExtension;component/Styles/BrushResources.xaml"/>
+                <ResourceDictionary Source="../Styles/BrushResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
             <Style x:Key="AnchorContainerStyle" TargetType="Grid">
@@ -50,10 +50,6 @@
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                             <ControlTemplate.Triggers>
-                                <DataTrigger Binding="{Binding Anchors.Count}" Value="0">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                </DataTrigger>
-
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter Property="Background" Value="#3E3E42"/>
                                     <Setter Property="BorderBrush" Value="#666"/>
@@ -130,7 +126,8 @@
                 <Grid>
                     <ToggleButton Style="{StaticResource AnchorToggleButtonStyle}"
                                   Command="{Binding OnToggleAnchorListCommand}"
-                                  IsChecked="{Binding IsAnchorListVisible, Mode=OneWay}"
+                                  IsChecked="{Binding IsAnchorListVisible.Value, Mode=OneWay}"
+                                  Visibility="{Binding IsAnchorToggleButtonVisible.Visibility}"
                                   Content="📌"
                                   />
                     <Border Background="White"

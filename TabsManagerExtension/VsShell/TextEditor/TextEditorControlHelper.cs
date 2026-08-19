@@ -147,6 +147,12 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                 return null;
             }
 
+            return TryGetViewHost(vsTextView);
+        }
+
+        public static IWpfTextViewHost? TryGetViewHost(IVsTextView vsTextView) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
             var componentModel = (IComponentModel?)Package.GetGlobalService(typeof(SComponentModel));
             var adapter = componentModel?.GetService<IVsEditorAdaptersFactoryService>();
             return adapter?.GetWpfTextViewHost(vsTextView);
