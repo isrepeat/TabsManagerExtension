@@ -43,6 +43,18 @@ namespace TabsManagerExtension.Controls {
                 new PropertyMetadata(false));
 
 
+        public bool IsMultipleSelection {
+            get { return (bool)this.GetValue(IsMultipleSelectionProperty); }
+            set { this.SetValue(IsMultipleSelectionProperty, value); }
+        }
+        public static readonly DependencyProperty IsMultipleSelectionProperty =
+            DependencyProperty.Register(
+                nameof(IsMultipleSelection),
+                typeof(bool),
+                typeof(TabItemControl),
+                new PropertyMetadata(false));
+
+
         public bool IsEditFocused {
             get { return (bool)this.GetValue(IsEditFocusedProperty); }
             set { this.SetValue(IsEditFocusedProperty, value); }

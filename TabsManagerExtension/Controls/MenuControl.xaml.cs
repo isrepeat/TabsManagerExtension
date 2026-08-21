@@ -67,16 +67,27 @@ namespace TabsManagerExtension.Controls {
         public event EventHandler MouseLeftPopup;
 
         private MenuClosedArgs? _menuControlClosedArgs;
+        // Хранит пункт, выбранный между событиями MenuItem.Click и Popup.Closed.
+        // Это позволяет сначала полностью скрыть меню, а затем выполнить команду пункта;
+        // при обычном закрытии без выбора значение остаётся null и команда не запускается.
+        private Helpers.MenuItemCommand? _pendingMenuItemCommand;
 
         public MenuControl() {
             this.InitializeComponent();
+            this.MenuItemsControl.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(this.MenuItem_OnClick), true);
             this.MouseLeftButtonDown += this.OnBlockMouseBubbling;
             this.MouseLeftButtonUp += this.OnBlockMouseBubbling;
             this.MouseRightButtonDown += this.OnBlockMouseBubbling;
             this.MouseRightButtonUp += this.OnBlockMouseBubbling;
         }
 
-        public void ShowMenu(object dataContext, PlacementMode placementMode, bool isStaysOpen, Point? screenPosition = null) {
+        public void ShowMenu(
+            object dataContext,
+            PlacementMode placementMode,
+            bool isStaysOpen,
+            Point? screenPosition = null,
+            FrameworkElement? placementTarget = null
+        ) {
             _menuControlClosedArgs = new MenuControl.MenuClosedArgs {
                 DataContext = dataContext
             };
@@ -95,6 +106,7 @@ namespace TabsManagerExtension.Controls {
             }
 
             this.MenuPopup.Placement = placementMode;
+            this.MenuPopup.PlacementTarget = placementTarget;
             this.MenuPopup.StaysOpen = isStaysOpen;
             if (screenPosition.HasValue) {
                 this.MoveMenu(screenPosition.Value);
@@ -135,6 +147,17 @@ namespace TabsManagerExtension.Controls {
             e.Handled = true;
         }
 
+        private void MenuItem_OnClick(object sender, RoutedEventArgs e) {
+            if (e.OriginalSource is not MenuItem { DataContext: Helpers.MenuItemCommand menuItemCommand }) {
+                return;
+            }
+
+            // В шаблоне MenuItem нет прямой привязки Command, поэтому клик только инициирует
+            // закрытие. Команда будет выполнена из MenuPopup_OnClosed.
+            _pendingMenuItemCommand = menuItemCommand;
+            this.MenuPopup.IsOpen = false;
+        }
+
         private void MenuPopup_OnClosed(object sender, System.EventArgs e) {
             var closedArgs = _menuControlClosedArgs;
             _menuControlClosedArgs = null;
@@ -144,6 +167,14 @@ namespace TabsManagerExtension.Controls {
 
             if (this.CloseCommand != null && this.CloseCommand.CanExecute(closedArgs)) {
                 this.CloseCommand.Execute(closedArgs);
+            }
+
+            // Popup уже полностью скрыт, поэтому даже тяжёлая команда больше не задержит
+            // исчезновение меню на экране.
+            var menuItemCommand = _pendingMenuItemCommand;
+            _pendingMenuItemCommand = null;
+            if (menuItemCommand?.Command.CanExecute(menuItemCommand.CommandParameterContext) == true) {
+                menuItemCommand.Command.Execute(menuItemCommand.CommandParameterContext);
             }
         }
         private void MenuPopup_OnMouseEnter(object sender, MouseEventArgs e) {

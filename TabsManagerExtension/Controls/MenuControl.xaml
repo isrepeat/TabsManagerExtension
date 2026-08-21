@@ -32,10 +32,10 @@
                 </StackPanel>
             </DataTemplate>
             <DataTemplate DataType="{x:Type helpers:MenuItemCommand}">
+                <!-- Команду исполняет MenuControl после Popup.Closed, а не сам MenuItem. -->
                 <MenuItem Style="{StaticResource MenuControl/MenuItemCommandStyle}"
                           Header="{Binding Header}"
-                          Command="{Binding Command}"
-                          CommandParameter="{Binding CommandParameterContext}"
+                          IsEnabled="{Binding IsEnabled}"
                           />
             </DataTemplate>
             <DataTemplate DataType="{x:Type helpers:MenuItemSeparator}">
@@ -63,7 +63,8 @@
                 BorderThickness="0"
                 MaxWidth="300"
                 >
-            <ItemsControl ItemsSource="{Binding MenuItems, ElementName=__MenuControl}"
+            <ItemsControl x:Name="MenuItemsControl"
+                          ItemsSource="{Binding MenuItems, ElementName=__MenuControl}"
                           ItemTemplateSelector="{Binding MenuItemTemplateSelector, ElementName=__MenuControl}"
                           />
         </Border>

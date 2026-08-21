@@ -178,6 +178,9 @@
                             <Setter TargetName="_Border" Property="BorderBrush" Value="#888FA0"/>
                             <Setter Property="Foreground" Value="#FFFFFF"/>
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="#FF666666" />
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

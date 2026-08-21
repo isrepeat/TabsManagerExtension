@@ -24,6 +24,83 @@
                 <Setter Property="BorderThickness" Value="0"/>
             </Style>
 
+            <Style x:Key="TabsEditModeToggleStyle" TargetType="ToggleButton">
+                <Setter Property="Width" Value="28" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="Margin" Value="0,1,1,1" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Foreground" Value="#FF777777" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1">
+                                <Path Width="14"
+                                      Height="10"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Data="M 0,1 L 14,1 M 0,5 L 14,5 M 0,9 L 14,9"
+                                      Stroke="{TemplateBinding Foreground}"
+                                      StrokeThickness="1.4"
+                                      StrokeStartLineCap="Square"
+                                      StrokeEndLineCap="Square"
+                                      Stretch="None" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Foreground" Value="#FFD4D4D4" />
+                                    <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter Property="Foreground" Value="#FFD4D4D4" />
+                                    <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                                    <Setter Property="BorderBrush" Value="{StaticResource AppAccentNonActiveMiddleBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="TabsToolbarMenuButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="24" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="Margin" Value="0,1,2,1" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Foreground" Value="#FF999999" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ButtonBackground"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1">
+                                <TextBlock HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="13"
+                                           Text="&#xE713;" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Foreground" Value="#FFD4D4D4" />
+                                    <Setter TargetName="ButtonBackground" Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Foreground" Value="White" />
+                                    <Setter TargetName="ButtonBackground" Property="Background" Value="{StaticResource AppSelectedBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
 
             <Style x:Key="TabsSettingsPanelStyle" TargetType="ContentControl">
                 <Setter Property="Background" Value="#333333" />
@@ -134,8 +211,7 @@
                 </DataTemplate.Resources>
 
                 <MenuItem Header="{Binding}"
-                          Command="{Binding Command}"
-                          CommandParameter="{Binding CommandParameterContext}"
+                          IsEnabled="{Binding IsEnabled}"
                           localBehaviours:MouseEnterCommandBehavior.Command="{Binding OnProjectContextMenuItemMouseEnterCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
                           localBehaviours:MouseEnterCommandBehavior.CommandParameter="{Binding RelativeSource={RelativeSource Self}}"
                           >
@@ -196,8 +272,7 @@
 
             <DataTemplate x:Key="DocumentProjectGroupContextCommandTemplate">
                 <MenuItem Header="{Binding Header}"
-                          Command="{Binding Command}"
-                          CommandParameter="{Binding CommandParameterContext}"
+                          IsEnabled="{Binding IsEnabled}"
                           localBehaviours:MouseEnterCommandBehavior.Command="{Binding OnProjectContextMenuItemMouseEnterCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
                           localBehaviours:MouseEnterCommandBehavior.CommandParameter="{Binding RelativeSource={RelativeSource Self}}">
                     <MenuItem.Style>
@@ -254,8 +329,7 @@
                                                />
                     <MenuItem Style="{StaticResource MenuControl/MenuItemCommandStyle}"
                               Header="{Binding Header}"
-                              Command="{Binding Command}"
-                              CommandParameter="{Binding CommandParameterContext}"
+                              IsEnabled="{Binding IsEnabled}"
                               />
                 </StackPanel>
             </DataTemplate>
@@ -285,6 +359,32 @@
                         x:Name="TabsSettingsPanel"
                         Grid.Row="0"
                         >
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Margin="6,0,0,0"
+                           VerticalAlignment="Center"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Text="Tabs" />
+                <ToggleButton Grid.Column="1"
+                              Style="{StaticResource TabsEditModeToggleStyle}"
+                              ToolTip="Toggle tab selection mode"
+                              IsChecked="{Binding IsTabEditMode, Mode=TwoWay}" />
+                <Button Grid.Column="2"
+                        Style="{StaticResource TabsToolbarMenuButtonStyle}"
+                        ToolTip="Tabs Manager settings"
+                        Command="{Binding OnToolbarMenuShowCommand}"
+                        CommandParameter="{Binding RelativeSource={RelativeSource Self}}" />
+                <localControls:MenuControl x:Name="ToolbarMenu"
+                                           Grid.ColumnSpan="3"
+                                           MenuItems="{Binding ToolbarMenuItems}"
+                                           OpenCommand="{Binding OnToolbarMenuOpenCommand}"
+                                           CloseCommand="{Binding OnToolbarMenuClosedCommand}" />
+            </Grid>
         </ContentControl>
 
         <Grid x:Name="DocumentContainer"
@@ -308,6 +408,7 @@
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
                                         IsEditMode="{Binding DataContext.IsTabEditMode, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
+                                        IsMultipleSelection="{Binding DataContext.IsMultipleTabSelection, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                                         MouseEnter="InteractiveArea_MouseEnter"
                                         MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
@@ -326,6 +427,7 @@
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
                                         IsEditMode="{Binding DataContext.IsTabEditMode, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
+                                        IsMultipleSelection="{Binding DataContext.IsMultipleTabSelection, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                                         MouseEnter="InteractiveArea_MouseEnter"
                                         MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
@@ -344,6 +446,7 @@
                                         Title="{Binding Caption}"
                                         IsSelected="{Binding IsSelected, Mode=TwoWay}"
                                         IsEditMode="{Binding DataContext.IsTabEditMode, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
+                                        IsMultipleSelection="{Binding DataContext.IsMultipleTabSelection, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                                         MouseEnter="InteractiveArea_MouseEnter"
                                         MouseLeave="InteractiveArea_MouseLeave"
                                         ContextMenuTemplate="{StaticResource Default_ContextMenuTemplate}" 
@@ -377,13 +480,6 @@
                                                 Title="Tabs: "
                                                 ScaleFactor="{Binding ScaleFactorTabsCompactness, Mode=TwoWay}"
                                                 />
-            <CheckBox Grid.Column="1"
-                      Margin="8,0,6,0"
-                      VerticalAlignment="Center"
-                      Content="Edit"
-                      ToolTip="Keyboard tab editing mode"
-                      IsChecked="{Binding IsTabEditMode, Mode=TwoWay}"
-                      />
         </Grid>
 
         <!-- Стек длительных фоновых операций расширения -->

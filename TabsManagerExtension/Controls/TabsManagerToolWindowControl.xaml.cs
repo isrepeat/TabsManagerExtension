@@ -62,6 +62,17 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        private ObservableCollection<Helpers.IMenuItem> _toolbarMenuItems;
+        public ObservableCollection<Helpers.IMenuItem> ToolbarMenuItems {
+            get => _toolbarMenuItems;
+            private set {
+                if (_toolbarMenuItems != value) {
+                    _toolbarMenuItems = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
         public ObservableCollection<State.BackgroundOperationStatus> BackgroundOperations =>
             Services.ExtensionStatusService.Instance.Operations;
 
@@ -114,9 +125,32 @@ namespace TabsManagerExtension.Controls {
                         this.Dispatcher.BeginInvoke(new Action(() => _keyboardTabNavigationExtension?.InitializeFocus()));
                     }
                     else {
+                        // При выходе из режима навигации сворачиваем мультивыбор до основного таба.
+                        // Если anchor отсутствует, сохраняем первый элемент текущего выделения.
+                        var retainedTab = _tabItemsSelectionCoordinator?.PrimarySelection?.Item
+                            ?? _tabItemsSelectionCoordinator?.SelectedItems.FirstOrDefault().Item;
+                        if (retainedTab != null) {
+                            _tabNavigationController.SetSelectionWithoutActivation(
+                                retainedTab,
+                                true,
+                                ModifierKeys.None
+                            );
+                        }
+
                         this.UpdateEditModeInputRedirect();
                         _keyboardTabNavigationExtension?.ClearFocus();
                     }
+                }
+            }
+        }
+
+        private bool _isMultipleTabSelection;
+        public bool IsMultipleTabSelection {
+            get => _isMultipleTabSelection;
+            private set {
+                if (_isMultipleTabSelection != value) {
+                    _isMultipleTabSelection = value;
+                    OnPropertyChanged();
                 }
             }
         }
@@ -150,6 +184,9 @@ namespace TabsManagerExtension.Controls {
         public ICommand OnTabItemVirtualMenuClosedCommand { get; }
         public ICommand OnProjectContextIncludersOpenCommand { get; }
         public ICommand OnProjectContextMenuItemMouseEnterCommand { get; }
+        public ICommand OnToolbarMenuShowCommand { get; }
+        public ICommand OnToolbarMenuOpenCommand { get; }
+        public ICommand OnToolbarMenuClosedCommand { get; }
 
         public TabsManagerToolWindowControl() {
             this.InitializeComponent();
@@ -159,7 +196,6 @@ namespace TabsManagerExtension.Controls {
             this.PreviewMouseDown += this.OnPreviewMouseDown;
             this.PreviewKeyDown += this.OnPreviewKeyDown;
             this.KeyDown += this.OnPreviewKeyDown;
-            base.DataContext = this;
 
             this.OnPinTabItemCommand = new Helpers.RelayCommand<object>(this.OnPinTabItem);
             this.OnUnpinTabItemCommand = new Helpers.RelayCommand<object>(this.OnUnpinTabItem);
@@ -173,13 +209,58 @@ namespace TabsManagerExtension.Controls {
             this.OnTabItemVirtualMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnTabItemVirtualMenuClosed);
             this.OnProjectContextIncludersOpenCommand = new Helpers.RelayCommand<object>(this.OnProjectContextIncludersOpen);
             this.OnProjectContextMenuItemMouseEnterCommand = new Helpers.RelayCommand<object>(this.OnProjectContextMenuItemMouseEnter);
+            this.OnToolbarMenuShowCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuShow);
+            this.OnToolbarMenuOpenCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuOpen);
+            this.OnToolbarMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuClosed);
+
+            base.DataContext = this;
         }
 
 
         //
         // ░ Self handlers
-        // ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 
+        // ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
         //
+        private void OnToolbarMenuShow(object parameter) {
+            if (parameter is not Button button) {
+                return;
+            }
+
+            this.ToolbarMenu.ShowMenu(
+                button,
+                System.Windows.Controls.Primitives.PlacementMode.Bottom,
+                false,
+                placementTarget: button
+            );
+        }
+
+        private void OnToolbarMenuOpen(object parameter) {
+            // Пункты создаются при каждом открытии, как у контекстного меню таба:
+            // актуальные команды и их доступность определяются непосредственно перед показом popup.
+            var unavailableCommand = new Helpers.RelayCommand(() => { }, () => false);
+            this.ToolbarMenuItems = new ObservableCollection<Helpers.IMenuItem> {
+                new Helpers.MenuItemCommand {
+                    Header = "Save tab layout (coming soon)",
+                    Command = unavailableCommand
+                },
+                new Helpers.MenuItemCommand {
+                    Header = "Restore tab layout (coming soon)",
+                    Command = unavailableCommand
+                },
+                new Helpers.MenuItemSeparator(),
+                new Helpers.MenuItemCommand {
+                    Header = "Options…",
+                    Command = new Helpers.RelayCommand(TabsManagerExtensionPackage.ShowOptions)
+                }
+            };
+        }
+
+        private void OnToolbarMenuClosed(object parameter) {
+            // Освобождаем созданные для текущего открытия пункты и связанные с ними команды.
+            this.ToolbarMenuItems = new ObservableCollection<Helpers.IMenuItem>();
+        }
+
+
         private void OnLoaded(object sender, RoutedEventArgs e) {
             Services.ExtensionServices.BeginUsage();
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
@@ -764,6 +845,7 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnSelectionStateChanged(Helpers.Enums.SelectionState selectionState) {
+            this.IsMultipleTabSelection = selectionState == Helpers.Enums.SelectionState.Multiple;
             _tabNavigationController.OnSelectionStateChanged(selectionState);
         }
 
