@@ -101,8 +101,6 @@ namespace TabsManagerExtension.ToolWindows {
 
             //var projectSourcesAnalyer = new VsShell.Project.ProjectSourcesAnalyzer(projectEntry.ProjectHierarchy.VsRealHierarchy);
             //projectSourcesAnalyer.Refresh();
-
-            //int xx = 9;
         }
 
         private async void ExecuteToggleStandardTabsLayout(object sender, EventArgs e) {

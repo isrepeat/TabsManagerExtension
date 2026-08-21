@@ -1,11 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <VssdkCompatibleExtension>true</VssdkCompatibleExtension>
+    <NeutralLanguage>en-US</NeutralLanguage>
     <MinimumVisualStudioVersion>18.0</MinimumVisualStudioVersion>
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
+    <DevEnvDir Condition="'$(DevEnvDir)' == ''">$(MSBuildToolsPath)\..\..\..\..\Common7\IDE\</DevEnvDir>
     <TargetFrameworkProfile />
   </PropertyGroup>
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -16,7 +21,6 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>TabsManagerExtension</RootNamespace>
     <AssemblyName>TabsManagerExtension</AssemblyName>
-    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <LangVersion>11.0</LangVersion>
     <Nullable>enable</Nullable>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
@@ -30,7 +34,7 @@
     <StartProgram Condition="'$(DevEnvDir)' != ''">$(DevEnvDir)devenv.exe</StartProgram>
     <!--<StartArguments>"$(SolutionDir)TESTS\TestIncludeSolution\TestIncludeSolution.sln" /RootSuffix Exp</StartArguments>-->
     <!--<StartArguments>"$(SolutionDir)..\Cpp\UtilityHelpersLib\UtilityHelpersLib.sln" /RootSuffix Exp</StartArguments>-->
-    <StartArguments>"$(SolutionDir)..\TabsManagerExtension - Copy\TabsManagerExtension.sln" /RootSuffix Exp</StartArguments>
+    <StartArguments>&quot;$([System.IO.Path]::GetFullPath('$(SolutionDir)..\TabsManagerExtension - Copy\TabsManagerExtension.sln'))&quot; /RootSuffix Exp</StartArguments>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -60,7 +64,7 @@
   -->
   <PropertyGroup>
     <!-- Убираем префикс 'v' -->
-    <VersionStr>$([System.String]::Copy($(TargetFrameworkVersion.Replace('v', ''))))</VersionStr>
+    <VersionStr>4.7.2</VersionStr>
     <!-- Убираем точки -->
     <VersionDigits>$([System.String]::Copy($(VersionStr.Replace('.', ''))))</VersionDigits>
     <!-- Формируем финальный символ -->
@@ -73,6 +77,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Configuration\TabsManagerConfiguration.cs" />
+    <Compile Include="Configuration\TabsManagerSettingDefinitions.cs" />
     <Compile Include="Behaviours\MouseEnterCommandBehavior.cs" />
     <Compile Include="Configuration\TabsManagerConfigurationService.cs" />
     <Compile Include="Controls\MenuControl.xaml.cs">
@@ -164,6 +169,7 @@
     <Compile Include="State\Constants.cs" />
     <Compile Include="State\TabItemDocment.cs" />
     <Compile Include="TabsManagerExtensionPackage.cs" />
+    <Compile Include="TabsManagerExtensibility.cs" />
     <Compile Include="ToolWindows\TabsManagerToolWindow.cs" />
     <Compile Include="ToolWindows\TabsManagerToolWindowCommand.cs" />
   </ItemGroup>
@@ -187,8 +193,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\UtilityHelpersLib\CodeAnalyzer\CodeAnalyzer.csproj"
-                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UtilityHelpersLib\CodeAnalyzer\CodeAnalyzer.csproj" ReferenceOutputAssembly="false" />
     <Analyzer Include="..\UtilityHelpersLib\CodeAnalyzer\obj\$(Configuration)\netstandard2.0\CodeAnalyzer.dll" />
   </ItemGroup>
   <ItemGroup>
@@ -205,7 +210,8 @@
     <PackageReference Include="Microsoft.VisualStudio.VCProjectEngine">
       <Version>17.14.40264</Version>
     </PackageReference>
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Sdk" Version="17.14.40608" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="Microsoft.VisualStudio.Interop">
@@ -266,11 +272,7 @@
     </VSCTCompile>
   </ItemGroup>
   <ItemGroup />
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />
-  <Target Name="GenerateDoxygenDocumentation"
-          AfterTargets="Build"
-          Condition="'$(GenerateDoxygenDocumentation)' == 'true'">
+  <Target Name="GenerateDoxygenDocumentation" AfterTargets="Build" Condition="'$(GenerateDoxygenDocumentation)' == 'true'">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\docs\GenerateDocumentation.ps1&quot;" />
   </Target>
   <!-- Microsoft.VSSDK.BuildTools 18.5 still defaults this property to 17.0. -->

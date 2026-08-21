@@ -242,11 +242,13 @@ namespace TabsManagerExtension {
         /// Переключает отображение между оригинальным содержимым PART_TabListHost и кастомным контролом.
         /// </summary>
         /// <param name="enable">Если true — включить кастомные вкладки, иначе вернуть оригинал.</param>
-        public void ToggleCustomTabs(bool enable) {
+        public void ToggleCustomTabs(bool enable, bool savePreference = true) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope($"ToggleCustomTabs({enable})");
 
             ThreadHelper.ThrowIfNotOnUIThread();
-            Configuration.TabsManagerConfigurationService.SetAutoLoadCustomTabs(enable);
+            if (savePreference) {
+                Configuration.TabsManagerConfigurationService.SetAutoLoadCustomTabs(enable);
+            }
 
             if (enable) {
                 if (!this.IsCustomTabsEnabled) {
@@ -280,7 +282,10 @@ namespace TabsManagerExtension {
                     return;
                 }
 
-                this.UpdateCustomTabsHost(true);
+                if (!this.UpdateCustomTabsHost(true)) {
+                    this.ScheduleCustomTabsInjectionRetry();
+                }
+
                 return;
             }
 
@@ -325,14 +330,11 @@ namespace TabsManagerExtension {
                     return true; // Уже вставлено
                 }
 
-                //Services.ExtensionServices.Initialize();
-
                 var customControl = new Controls.TabsManagerToolWindowControl();
                 customControl.Unloaded += this.OnInjectedControlUnloaded;
 
                 tabHost.Child = customControl;
                 _lastInjectedContent = new WeakReference<UIElement>(customControl);
-
                 Helpers.Diagnostic.Logger.LogDebug("TabsManagerToolWindowControl injected.");
             }
             else {

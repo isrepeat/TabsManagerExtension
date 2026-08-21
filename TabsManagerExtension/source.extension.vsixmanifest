@@ -1,11 +1,11 @@
 ﻿<?xml version="1.0" ?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
     <Metadata>
-        <Identity Id="TabsManagerExtension.93937105-d7bb-4eee-9a06-2eb9d8353aab" Version="1.1" Language="en-US" Publisher="isrepeat" />
+        <Identity Id="TabsManagerExtension.93937105-d7bb-4eee-9a06-2eb9d8353aab" Version="1.2" Language="en-US" Publisher="isrepeat" />
         <DisplayName>TabsManagerExtension</DisplayName>
         <Description xml:space="preserve">Empty VSIX Project.</Description>
     </Metadata>
-    <Installation>
+    <Installation ExtensionType="VSSDK+VisualStudio.Extensibility">
         <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[18.0, 19.0)">
             <ProductArchitecture>amd64</ProductArchitecture>
         </InstallationTarget>

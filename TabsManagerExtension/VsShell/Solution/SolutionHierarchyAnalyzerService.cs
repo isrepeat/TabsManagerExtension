@@ -183,6 +183,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
         private readonly HashSet<Helpers.DirectoryChangedEventArgs> _pendingChangedFiles = new();
         private string _lastLoadedSolutionName;
+        private string _pendingSolutionName;
         private bool _analyzingInProcess = false;
 
         public readonly Helpers.Events.Action<string> InitialAnalysisCompleted = new();
@@ -209,14 +210,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
-            // Не блокируем создание UI Tabs Manager первоначальным обходом большого solution.
-            // Запомненный SolutionLoaded будет обработан после возврата управления Dispatcher.
-            VsixThreadHelper.RunOnUiThread(
-                new Action(
-                    () => VsShell.Services.VsIDEStateFlagsTrackerService.Instance.InvokeIfSolutionLoaded(this.OnSolutionLoaded)
-                ),
-                DispatcherPriority.Background
-            );
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.InvokeIfSolutionLoaded(this.OnSolutionLoaded);
 
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
             VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
@@ -307,9 +301,28 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnSolutionLoaded()");
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (solutionName == _lastLoadedSolutionName) {
+            if (solutionName == _lastLoadedSolutionName || solutionName == _pendingSolutionName) {
                 return;
             }
+
+            _pendingSolutionName = solutionName;
+            // Сначала даём WPF отрисовать уже встроенный Tabs Manager. Обход иерархии
+            // остаётся на UI-потоке из-за VSSDK API, но начинается после первого кадра.
+            VsixThreadHelper.RunOnUiThread(
+                new Action(() => this.AnalyzeLoadedSolution(solutionName)),
+                DispatcherPriority.Background
+            );
+        }
+
+        private void AnalyzeLoadedSolution(string solutionName) {
+            using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("AnalyzeLoadedSolution()");
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (solutionName != _pendingSolutionName) {
+                return;
+            }
+
+            _pendingSolutionName = null;
             _lastLoadedSolutionName = solutionName;
 
             this.AnalyzeSolutionProjects();
@@ -324,6 +337,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             _lastLoadedSolutionName = null;
+            _pendingSolutionName = null;
             this.HasInitialAnalysisCompleted = false;
             _solutionProjects.ClearAndDispose();
         }

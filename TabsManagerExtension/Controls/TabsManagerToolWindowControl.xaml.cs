@@ -263,6 +263,7 @@ namespace TabsManagerExtension.Controls {
 
         private void OnLoaded(object sender, RoutedEventArgs e) {
             Services.ExtensionServices.BeginUsage();
+            Configuration.TabsManagerConfigurationService.TabsScaleFactorChanged += this.OnTabsScaleFactorChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
             this.UpdateEditModeInputRedirect();
             Services.ExtensionStatusService.Instance.FeatureReadinessChanged += this.OnFeatureReadinessChanged;
@@ -283,6 +284,7 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            Configuration.TabsManagerConfigurationService.TabsScaleFactorChanged -= this.OnTabsScaleFactorChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.SetForcedInputTarget(null);
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.RemoveTrackedInputElement(this);
             VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.Remove(this.OnInitialHierarchyAnalysisCompleted);
@@ -295,6 +297,10 @@ namespace TabsManagerExtension.Controls {
             this.UninitializeDTE();
 
             Services.ExtensionServices.EndUsage();
+        }
+
+        private void OnTabsScaleFactorChanged(double value) {
+            this.Dispatcher.InvokeAsync(() => this.ScaleFactorTabsCompactness = value);
         }
 
         private void OnInitialHierarchyAnalysisCompleted(string solutionName) {
@@ -909,7 +915,10 @@ namespace TabsManagerExtension.Controls {
             foreach (var group in this.SortedTabItemsGroups.ToList()) {
                 var toRemove = group.Items
                     .OfType<TabItemWindow>()
-                    .Where(w => !openWindowIds.Contains(w.WindowId))
+                    // Новые встроенные страницы VS (например All Settings) могут быть
+                    // доступны через событие WindowActivated, но отсутствовать в DTE.Windows.
+                    // Пока такое окно видимо, отсутствие в COM-коллекции не означает закрытие.
+                    .Where(w => !openWindowIds.Contains(w.WindowId) && !IsWindowVisible(w))
                     .ToList();
 
                 foreach (var tab in toRemove) {
@@ -919,6 +928,17 @@ namespace TabsManagerExtension.Controls {
 
             // === [D] Обновление окон типа TabItemWindow ===
             this.UpdateWindowTabsInfo();
+        }
+
+        private static bool IsWindowVisible(TabItemWindow tabItemWindow) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            try {
+                return tabItemWindow.ShellWindow.Window.Visible;
+            }
+            catch (Exception) {
+                return false;
+            }
         }
 
 
@@ -1721,7 +1741,9 @@ namespace TabsManagerExtension.Controls {
 
             var windowIds = PackageServices.Dte2.Windows
                 .Cast<EnvDTE.Window>()
-                .Where(window => window.Document == null && VsShell.Document.ShellWindow.IsTabWindow(window))
+                // DTE.Windows содержит также закрытые скрытые окна. Без проверки Visible
+                // они снова сохраняются и принудительно открываются при следующем запуске.
+                .Where(window => window.Visible && window.Document == null && VsShell.Document.ShellWindow.IsTabWindow(window))
                 .Select(VsShell.Document.ShellWindow.GetWindowId);
 
             Configuration.TabsManagerConfigurationService.SetOpenToolWindowIds(windowIds);

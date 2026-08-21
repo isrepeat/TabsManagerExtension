@@ -28,7 +28,7 @@ using Task = System.Threading.Tasks.Task;
 
 [assembly: Helpers.Attributes.CodeAnalyzerEnableLogs]
 
-#if NET_FRAMEWORK_472
+#if NETFRAMEWORK
 namespace System.Runtime.CompilerServices {
     internal static class IsExternalInit { } // need for "init" keyword
 }
@@ -53,6 +53,10 @@ namespace TabsManagerExtension {
     public sealed class TabsManagerExtensionPackage : AsyncPackage {
         public const string PackageGuidString = "7a0ce045-e2ba-4f14-8b80-55cfd666e3d8";
         private const string OptionKey = "TabsManagerExtension";
+        internal static void ShowOptions() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            PackageServices.Dte2.ExecuteCommand("Tools.Options");
+        }
 
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress) {
             // When initialized asynchronously, the current thread may be a background thread at this point.
@@ -64,27 +68,86 @@ namespace TabsManagerExtension {
             //CppFeatures.Cx.Logger.Init(AppConstants.LogFilename, initFlags);
 
             //Console.Beep(1000, 500); // 1000 Гц, 500 мс
+            Configuration.TabsManagerConfigurationService.SettingsInitialized += this.OnSettingsInitialized;
+
             Services.ExtensionServices.Initialize();
 
+            // По умолчанию вкладки включены. Встраиваем их сразу, не ожидая ленивой
+            // активации VisualStudio.Extensibility и чтения пользовательских настроек.
+            this.EnableCustomTabsImmediately();
+
+#if DEBUG
+            this.ConfigureExperimentalStartup();
+#endif
             this.InitializeEvents();
 
 #if ENABLE_EARLY_PACKAGE_LOAD_HACK
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
 #endif
-            this.RestoreCustomTabsImmediately();
+            if (Configuration.TabsManagerConfigurationService.IsSettingsInitialized) {
+                this.ApplyCustomTabsSetting();
+            }
+
             await ToolWindows.TabsManagerToolWindowCommand.InitializeAsync(this);
             this.ShowLoadedStatusAfterShellBecomesIdle();
         }
 
-        private void RestoreCustomTabsImmediately() {
+#if DEBUG
+        private void ConfigureExperimentalStartup() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (!Configuration.TabsManagerConfigurationService.AutoLoadCustomTabs) {
+            try {
+                var startupProperties = PackageServices.Dte2.Properties["Environment", "Startup"];
+                var onStartup = startupProperties?.Item("OnStartUp");
+                int loadLastSolution = (int)EnvDTE.vsStartUp.vsStartUpLoadLastSolution;
+                if (onStartup != null && Convert.ToInt32(onStartup.Value) != loadLastSolution) {
+                    onStartup.Value = loadLastSolution;
+                }
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogDebug($"[Package] Не удалось настроить запуск Experimental Instance: {ex.Message}");
+            }
+        }
+#endif
+
+        private void OnSettingsInitialized() {
+            this.JoinableTaskFactory.RunAsync(async () => {
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
+                this.ApplyCustomTabsSetting();
+            }).FileAndForget("TabsManagerExtension/RestoreCustomTabsAfterSettingsInitialization");
+        }
+
+        protected override void Dispose(bool disposing) {
+            if (disposing) {
+                Configuration.TabsManagerConfigurationService.SettingsInitialized -= this.OnSettingsInitialized;
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private void EnableCustomTabsImmediately() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
+                Helpers.Diagnostic.Logger.LogDebug("[Package] Раннее встраивание вкладок с настройкой по умолчанию AutoLoadCustomTabs=True.");
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true, savePreference: false);
+            }
+        }
+
+        private void ApplyCustomTabsSetting() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            bool shouldEnable = Configuration.TabsManagerConfigurationService.AutoLoadCustomTabs;
+            if (shouldEnable) {
+                // Даже если логическое состояние уже включено, host мог отсутствовать
+                // на Start Window и появиться только после открытия решения.
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true, savePreference: false);
                 return;
             }
 
-            if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
-                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true);
+            if (VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
+                Helpers.Diagnostic.Logger.LogDebug("[Package] Применяем AutoLoadCustomTabs=False.");
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(false, savePreference: false);
             }
         }
 
@@ -102,6 +165,12 @@ namespace TabsManagerExtension {
             Helpers.Diagnostic.Logger.LogDebug($"[Package] OnSolutionLoaded(): solutionName = {solutionName}");
             PackageServices.Invalidate();
             this.ShowLoadedStatusAfterShellBecomesIdle();
+
+            if (VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
+                // На Start Window области документов ещё нет. После загрузки решения
+                // повторяем внедрение в уже созданный PART_TabListHost.
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(true, savePreference: false);
+            }
 
 #if AUTO_ENABLE_CUSTOM_TABS
             if (VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {

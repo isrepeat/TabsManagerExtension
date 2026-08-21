@@ -171,19 +171,28 @@ namespace TabsManagerExtension.VsShell.Utils {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             projectGuid = Guid.Empty;
-
-            try {
-                var prop = project.Properties?.Item("ProjectGuid");
-                if (prop != null && Guid.TryParse(prop.Value?.ToString(), out var parsedGuid)) {
-                    projectGuid = parsedGuid;
-                    return true;
-                }
-            }
-            catch {
-                // Проект может не содержать свойство ProjectGuid
+            var vsSolution = PackageServices.TryGetVsSolution();
+            if (vsSolution == null || string.IsNullOrEmpty(project?.UniqueName)) {
+                return false;
             }
 
-            return false;
+            int hierarchyHr = vsSolution.GetProjectOfUniqueName(project.UniqueName, out var hierarchy);
+            if (ErrorHandler.Failed(hierarchyHr) || hierarchy == null) {
+                return false;
+            }
+
+            int guidHr = hierarchy.GetGuidProperty(
+                VSConstants.VSITEMID_ROOT,
+                (int)__VSHPROPID.VSHPROPID_ProjectIDGuid,
+                out projectGuid
+            );
+
+            if (ErrorHandler.Failed(guidHr)) {
+                projectGuid = Guid.Empty;
+                return false;
+            }
+
+            return projectGuid != Guid.Empty;
         }
 
         private static bool IsFileInProjectItemsRecursive(string filePath, EnvDTE.ProjectItems items) {

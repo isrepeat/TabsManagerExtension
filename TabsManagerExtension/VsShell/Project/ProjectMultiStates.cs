@@ -73,11 +73,6 @@ namespace TabsManagerExtension.VsShell.Project {
             base.CommonState.SharedItems.ClearAndDispose();
             base.CommonState.Sources.ClearAndDispose();
 
-            //if (this.ProjectNode.UniqueName == "Editor\\Editor.vcxproj") {
-            if (base.UniqueName == "Engine\\Engine.vcxproj") {
-                int xx = 9;
-            }
-
             _projectHierarchyTracker = new ProjectHierarchyTracker(this.ProjectHierarchy.VsRealHierarchy);
 
             _projectHierarchyTracker.ExternalDependenciesChanged.Add(this.OnExternalDependenciesChanged);

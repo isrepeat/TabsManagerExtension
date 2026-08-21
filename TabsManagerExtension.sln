@@ -62,6 +62,7 @@ Global
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Debug|ARM64.Build.0 = Debug|arm64
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Debug|x64.ActiveCfg = Debug|Any CPU
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Debug|x64.Build.0 = Debug|Any CPU
+		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Debug|x64.Deploy.0 = Debug|Any CPU
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Debug|x86.ActiveCfg = Debug|x86
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Debug|x86.Build.0 = Debug|x86
 		{152F249B-DD89-43AA-9021-2AD93ACF4DDA}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -92,10 +93,10 @@ Global
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		UtilityHelpersLib\HelpersCs\HelpersCs\HelpersCs.projitems*{0eeeeb5d-bb3b-4e9f-b2a7-410ca571ac97}*SharedItemsImports = 13
-		UtilityHelpersLib\HelpersCs\HelpersCs.Attributes\HelpersCs.Attributes.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
-		UtilityHelpersLib\HelpersCs\HelpersCs.Diagnostic\HelpersCs.Diagnostic.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
-		UtilityHelpersLib\HelpersCs\HelpersCs.Visual\HelpersCs.Visual.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
-		UtilityHelpersLib\HelpersCs\HelpersCs\HelpersCs.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 4
+		UtilityHelpersLib\HelpersCs\HelpersCs.Attributes\HelpersCs.Attributes.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 5
+		UtilityHelpersLib\HelpersCs\HelpersCs.Diagnostic\HelpersCs.Diagnostic.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 5
+		UtilityHelpersLib\HelpersCs\HelpersCs.Visual\HelpersCs.Visual.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 5
+		UtilityHelpersLib\HelpersCs\HelpersCs\HelpersCs.projitems*{152f249b-dd89-43aa-9021-2ad93acf4dda}*SharedItemsImports = 5
 		UtilityHelpersLib\HelpersCs\HelpersCs.Diagnostic\HelpersCs.Diagnostic.projitems*{5dc1b831-8a22-4c59-9d3f-b081e2f6af36}*SharedItemsImports = 13
 		UtilityHelpersLib\HelpersCs\HelpersCs.Visual\HelpersCs.Visual.projitems*{86ac5b14-7fba-4d5b-b711-90e3f7798e0c}*SharedItemsImports = 13
 		UtilityHelpersLib\HelpersCs\HelpersCs.Attributes\HelpersCs.Attributes.projitems*{cd563dc0-5c5f-423c-b1ce-74b120659770}*SharedItemsImports = 13
