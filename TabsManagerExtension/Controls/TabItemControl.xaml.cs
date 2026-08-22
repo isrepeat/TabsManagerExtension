@@ -120,7 +120,7 @@ namespace TabsManagerExtension.Controls {
             this.Unloaded += this.OnUnloaded;
             this.PreviewKeyDown += this.OnPreviewKeyDown;
             // Внутренний CheckBox завершает MouseLeftButtonUp как handled. Подписка с
-            // handledEventsToo нужна, чтобы edit mode получил любой клик по вкладке.
+            // handledEventsToo нужна для общей обработки выбора и активации вкладки.
             this.AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler(this.OnMouseLeftButtonUp), true);
             this.MouseEnter += this.OnMouseEnter;
             this.MouseLeave += this.OnMouseLeave;
@@ -148,7 +148,15 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
-            Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.HandleTabPointerNavigation(this);
+            // Кнопки pin/close/keep-open находятся внутри вкладки, но их клик не является
+            // выбором самой вкладки и не должен менять активный VS-фрейм.
+            if (e.OriginalSource is Button ||
+                e.OriginalSource is DependencyObject d && Helpers.VisualTree.FindParentByType<Button>(d) != null
+                ) {
+                return;
+            }
+
+            Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.HandleTabPointerNavigation(this, Keyboard.Modifiers);
         }
 
         private void OnMouseEnter(object sender, MouseEventArgs e) {

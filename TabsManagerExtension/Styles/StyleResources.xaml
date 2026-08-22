@@ -22,7 +22,8 @@
 
     <Style x:Key="CustomListViewItemStyle" TargetType="ListViewItem">
         <Setter Property="Focusable" Value="False"/>
-        <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"/>
+        <!-- Неактивная вкладка сливается с фоном панели; фон появляется только из trigger вкладки. -->
+        <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -77,11 +78,27 @@
         </Style.Triggers>
     </Style>
 
+    <!-- Фиксированный квадрат и собственный template обеспечивают одинаковое центрирование
+         векторных значков независимо от их Path-геометрии. -->
     <Style x:Key="TabItemControlPanelButtonStyle" TargetType="Button" BasedOn="{StaticResource DarkPopupButtonStyle}">
-        <Setter Property="Padding" Value="5, 0"/>
-        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="Width" Value="22"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Foreground" Value="#FFD0D0D0"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Приглушённая кнопка открытия второго уровня каскадного меню. -->

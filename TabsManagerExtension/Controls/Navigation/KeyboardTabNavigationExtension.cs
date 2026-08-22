@@ -46,11 +46,17 @@ namespace TabsManagerExtension.Controls.Navigation {
             }
 
             if (key == Key.Space) {
+                // Space меняет только membership текущей вкладки в мультивыборе. Активный
+                // VS-фрейм остаётся прежним, если выбранная policy не требует обратного.
                 _navigationController.SetSelectionWithoutActivation(
                     this.FocusedItem,
                     !this.FocusedItem.IsSelected,
                     ModifierKeys.Control
                 );
+
+                if (this.FocusedItem.IsSelected) {
+                    _navigationController.ActivateLatestSelectionIfConfigured(this.FocusedItem);
+                }
 
                 this.InputTargetRestoreRequested?.Invoke();
                 return true;
@@ -71,7 +77,10 @@ namespace TabsManagerExtension.Controls.Navigation {
             this.SetFocusedItem(targetItem);
 
             if ((modifiers & ModifierKeys.Shift) == ModifierKeys.Shift) {
+                // Shift+стрелка одновременно перемещает навигационный фокус и расширяет диапазон
+                // от anchor, который определяется текущей политикой активации.
                 _navigationController.SetSelectionWithoutActivation(targetItem, true, ModifierKeys.Shift);
+                _navigationController.ActivateLatestSelectionIfConfigured(targetItem);
             }
 
             return true;

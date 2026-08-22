@@ -134,37 +134,71 @@
 
             <!-- Temlates -->
             <!-- TabItemControl button templates -->
+            <!-- Геометрия задана локальными Path, чтобы значки можно было независимо менять,
+                 сохраняя одинаковое центрирование и наследование Foreground от кнопки. -->
             <DataTemplate x:Key="CloseButton_PrimarySlotTemplate">
                 <Button Style="{StaticResource TabItemControlPanelButtonStyle}"
-                        Content="✖"
+                        ToolTip="Close tab"
                         Command="{Binding OnCloseTabItemCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
-                        CommandParameter="{Binding}"
-                        />
+                        CommandParameter="{Binding}">
+                    <Path Width="16"
+                          Height="16"
+                          Data="M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="0.8"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          Stretch="None" />
+                </Button>
             </DataTemplate>
             <DataTemplate x:Key="PinButton_SecondarySlotTemplate">
                 <Button Style="{StaticResource TabItemControlPanelButtonStyle}"
-                        Content="&#xE718;"
                         ToolTip="Pin tab"
-                        FontFamily="Segoe MDL2 Assets"
                         Command="{Binding OnPinTabItemCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
-                        CommandParameter="{Binding}"
-                        />
+                        CommandParameter="{Binding}">
+                    <Path Width="16"
+                          Height="16"
+                          Data="M 9.5,2.5 L 13.5,6.5 L 11.5,7.5 L 9.5,9.5 L 8.5,12.5 L 3.5,7.5 L 6.5,6.5 L 8.5,4.5 Z M 5.5,10.5 L 2.5,13.5"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="0.8"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          StrokeLineJoin="Round"
+                          Stretch="None" />
+                </Button>
             </DataTemplate>
             <DataTemplate x:Key="UnpinButton_SecondarySlotTemplate">
                 <Button Style="{StaticResource TabItemControlPanelButtonStyle}"
-                        Content="&#xE77A;"
                         ToolTip="Unpin tab"
-                        FontFamily="Segoe MDL2 Assets"
                         Command="{Binding OnUnpinTabItemCommand, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
-                        CommandParameter="{Binding}" 
-                        />
+                        CommandParameter="{Binding}">
+                    <Path Width="16"
+                          Height="16"
+                          Data="M 9.5,2.5 L 13.5,6.5 L 11.5,7.5 L 9.5,9.5 L 8.5,12.5 L 3.5,7.5 L 6.5,6.5 L 8.5,4.5 Z M 5.5,10.5 L 2.5,13.5"
+                          Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="0.8"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          StrokeLineJoin="Round"
+                          Stretch="None" />
+                </Button>
             </DataTemplate>
             <DataTemplate x:Key="PreviewButton_SecondarySlotTemplate">
                 <Button Style="{StaticResource TabItemControlPanelButtonStyle}"
-                        Content="📂"
+                        ToolTip="Keep Tab Open (Ctrl+Alt+Home)"
                         Command="{Binding OnKeepOpenedTabItemCommand, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
-                        CommandParameter="{Binding}"
-                        />
+                        CommandParameter="{Binding}">
+                    <Path Width="16"
+                          Height="16"
+                          Data="M 6.5,3.5 L 2.5,7.5 L 6.5,11.5 M 2.5,7.5 L 9.5,7.5 C 12.3,7.5 13.5,9.2 13.5,12.5"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="0.8"
+                          StrokeStartLineCap="Round"
+                          StrokeEndLineCap="Round"
+                          StrokeLineJoin="Round"
+                          Stretch="None" />
+                </Button>
             </DataTemplate>
 
             

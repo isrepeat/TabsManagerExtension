@@ -29,22 +29,35 @@
                                 Обязательно задаём Background, иначе Padding не ловит клики.
                                 Без этого CheckBox не реагирует на нажатия вне текста.
                             -->
-                            <Border Padding="5,0,0,0"
-                                    Margin="0,0,5,0"
-                                    Background="{TemplateBinding Background}"
-                                    BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="1"
-                                    IsHitTestVisible="True"
-                                    >
-                                <ContentPresenter />
-                            </Border>
+                            <Grid Margin="0,0,5,0">
+                                <!-- Основная рамка отражает только активный VS-фрейм. -->
+                                <Border Padding="5,0,0,0"
+                                        Background="{TemplateBinding Background}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="1"
+                                        IsHitTestVisible="True">
+                                    <ContentPresenter />
+                                </Border>
+                                <!-- Отдельный overlay не смешивает клавиатурный фокус с активной рамкой. -->
+                                <Rectangle x:Name="KeyboardNavigationBorder"
+                                           IsHitTestVisible="False"
+                                           SnapsToDevicePixels="True"
+                                           Stroke="#FF808080"
+                                           StrokeThickness="1"
+                                           StrokeDashArray="2,2"
+                                           Visibility="Collapsed" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <DataTrigger Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True">
+                                    <Setter TargetName="KeyboardNavigationBorder" Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
                         <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
-                        <Setter Property="BorderBrush" Value="{StaticResource AppIsMouseOverBrush}" />
                         <Setter Property="Foreground" Value="White"/>
                     </Trigger>
 
@@ -60,62 +73,22 @@
                     <MultiDataTrigger>
                         <MultiDataTrigger.Conditions>
                             <Condition Binding="{Binding IsSelected}" Value="True"/>
-                            <Condition Binding="{Binding [TextEditorFrameFocused], Source={x:Static helpers:GlobalFlags.Metadata}}" Value="True" />
+                            <Condition Binding="{Binding IsMultipleSelection, ElementName=__TabItemControl}" Value="True"/>
                         </MultiDataTrigger.Conditions>
-                        <Setter Property="Background" Value="{StaticResource AppSelectedBrush}" />
-                        <Setter Property="BorderBrush" Value="{StaticResource AppSelectedBrush}" />
-                    </MultiDataTrigger>
-
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding IsSelected}" Value="True"/>
-                            <Condition Binding="{Binding [TextEditorFrameFocused], Source={x:Static helpers:GlobalFlags.Metadata}}" Value="False" />
-                        </MultiDataTrigger.Conditions>
-                        <Setter Property="Background" Value="{StaticResource AppSelectedNonActiveBrush}" />
-                        <Setter Property="BorderBrush" Value="{StaticResource AppSelectedNonActiveBrush}" />
-                    </MultiDataTrigger>
-
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding Metadata[IsCtxMenuOpenned]}" Value="True"/>
-                        </MultiDataTrigger.Conditions>
+                        <!-- Элементы мультивыбора используют тот же фон, что и hover. -->
                         <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
-                        <Setter Property="BorderBrush" Value="{StaticResource AppIsMouseOverBrush}" />
-                        <Setter Property="Foreground" Value="White"/>
                     </MultiDataTrigger>
 
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding Metadata[IsVirtualMenuOpenned]}" Value="True"/>
-                        </MultiDataTrigger.Conditions>
-                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
-                        <Setter Property="BorderBrush" Value="{StaticResource AppIsMouseOverBrush}" />
-                        <Setter Property="Foreground" Value="White"/>
-                    </MultiDataTrigger>
-
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding Metadata[IsActive]}" Value="True"/>
-                            <Condition Binding="{Binding [TextEditorFrameFocused], Source={x:Static helpers:GlobalFlags.Metadata}}" Value="True" />
-                        </MultiDataTrigger.Conditions>
+                    <!-- Фиолетовая рамка принадлежит фактически открытому VS-фрейму, а не selection. -->
+                    <DataTrigger Binding="{Binding Metadata[IsFrameActive]}" Value="True">
                         <Setter Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
-                    </MultiDataTrigger>
-
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding Metadata[IsActive]}" Value="True"/>
-                            <Condition Binding="{Binding [TextEditorFrameFocused], Source={x:Static helpers:GlobalFlags.Metadata}}" Value="False" />
-                        </MultiDataTrigger.Conditions>
-                        <Setter Property="BorderBrush" Value="{StaticResource AppAccentNonActiveMiddleBrush}" />
-                    </MultiDataTrigger>
-
-                    <DataTrigger Binding="{Binding IsKeyboardFocusWithin, ElementName=__TabItemControl}" Value="True">
-                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
                     </DataTrigger>
 
+                    <!-- Пунктирный overlay рисуется отдельно, поэтому основную рамку здесь скрываем. -->
                     <DataTrigger Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True">
-                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                        <Setter Property="BorderBrush" Value="Transparent" />
                     </DataTrigger>
+
                 </Style.Triggers>
             </Style>
 

@@ -125,18 +125,8 @@ namespace TabsManagerExtension.Controls {
                         this.Dispatcher.BeginInvoke(new Action(() => _keyboardTabNavigationExtension?.InitializeFocus()));
                     }
                     else {
-                        // При выходе из режима навигации сворачиваем мультивыбор до основного таба.
-                        // Если anchor отсутствует, сохраняем первый элемент текущего выделения.
-                        var retainedTab = _tabItemsSelectionCoordinator?.PrimarySelection?.Item
-                            ?? _tabItemsSelectionCoordinator?.SelectedItems.FirstOrDefault().Item;
-                        if (retainedTab != null) {
-                            _tabNavigationController.SetSelectionWithoutActivation(
-                                retainedTab,
-                                true,
-                                ModifierKeys.None
-                            );
-                        }
-
+                        // Выход из режима навигации убирает только пунктирный фокус.
+                        // Сформированный пользователем мультивыбор должен сохраниться.
                         this.UpdateEditModeInputRedirect();
                         _keyboardTabNavigationExtension?.ClearFocus();
                     }
@@ -172,7 +162,10 @@ namespace TabsManagerExtension.Controls {
         private Navigation.KeyboardTabNavigationExtension _keyboardTabNavigationExtension;
         private VsShell.TextEditor.Overlay.TextEditorOverlayController _textEditorOverlayController;
         private readonly HashSet<TabItemControl> _tabItemControls = new();
-
+        // Текущий UX: только обычный ЛКМ меняет активный документ; Ctrl/Shift/Space
+        // управляют selection, не перемещая фиолетовую рамку активного VS-фрейма.
+        private const Navigation.TabSelectionActivationPolicy TabSelectionActivationPolicy =
+            Navigation.TabSelectionActivationPolicy.ActivateOnlyOnUnmodifiedPointerSelection;
 
         public ICommand OnPinTabItemCommand { get; }
         public ICommand OnUnpinTabItemCommand { get; }
@@ -325,21 +318,59 @@ namespace TabsManagerExtension.Controls {
         private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (e.OriginalSource is DependencyObject d && !this.ex_HasInteractiveElementOnPathFrom(d)) {
-                // Клик по пустому пространству.
+            // У DocumentContainer намеренно нет Background: пустая область не должна сама становиться
+            // WPF-целью ввода. Поэтому определяем попадание по координатам на корневом PreviewMouseDown.
+            var pointerPosition = e.GetPosition(this.DocumentContainer);
+            bool isInsideDocumentContainer =
+                pointerPosition.X >= 0 &&
+                pointerPosition.Y >= 0 &&
+                pointerPosition.X <= this.DocumentContainer.ActualWidth &&
+                pointerPosition.Y <= this.DocumentContainer.ActualHeight;
 
-                var selectedTabItem = _tabItemsSelectionCoordinator.PrimarySelection?.Item;
-                if (selectedTabItem is IActivatableTab activatableTab) {
-                    activatableTab.Activate(); // Инициирует фокус редактора (или окна на его месте).
+            var originalSource = e.OriginalSource as DependencyObject;
+            bool isTabInteraction = originalSource is TabItemControl ||
+                originalSource != null && Helpers.VisualTree.FindParentByType<TabItemControl>(originalSource) != null;
+
+            bool isButtonInteraction = originalSource is System.Windows.Controls.Primitives.ButtonBase ||
+                originalSource != null && Helpers.VisualTree.FindParentByType<System.Windows.Controls.Primitives.ButtonBase>(originalSource) != null;
+
+            // Клик по вкладке или кнопке имеет собственную семантику и не считается кликом по пустой области.
+            if (isInsideDocumentContainer && !isTabInteraction && !isButtonInteraction) {
+                // Сбрасываем мультивыбор явно: повторная активация уже открытого документа
+                // может не породить событие DTE после команд контекстного меню.
+                var activeFrameTabItem = this.SortedTabItemsGroups
+                    .SelectMany(group => group.Items)
+                    .FirstOrDefault(tabItem => tabItem.Metadata.GetFlag("IsFrameActive"));
+
+                // Фиолетовая рамка отражает фактический VS-фрейм и имеет приоритет над PrimarySelection,
+                // которая при мультивыборе может указывать на совсем другую вкладку.
+                var retainedTabItem = activeFrameTabItem ?? _tabItemsSelectionCoordinator.PrimarySelection?.Item;
+
+                if (retainedTabItem != null) {
+                    _tabNavigationController.SetSelectionWithoutActivation(retainedTabItem, true, ModifierKeys.None);
                 }
 
-                // Переводи фокус с редактора на наш контрол (чтобы редактор стал не активным, например для ввода).
-                this.FocusStealer.Focus();
+                if (this.IsTabEditMode) {
+                    // В режиме навигации пустая область активирует панель: дальнейшие стрелки
+                    // должны продолжать перемещать пунктирный навигационный фокус по вкладкам.
+                    if (retainedTabItem != null) {
+                        _keyboardTabNavigationExtension.FocusItem(retainedTabItem);
+                    }
 
-                // Глобально сбрасываем клавишный фокус со всего.
-                //Keyboard.ClearFocus();
+                    // FocusedItem мог не измениться, поэтому восстанавливаем input target явно.
+                    this.FocusEditModeInputTarget();
+                    Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", false);
+                }
+                else {
+                    // В обычном режиме панель не удерживает фокус — возвращаем его активному
+                    // документу или tool window, сохранив при этом одиночное выделение вкладки.
+                    if (retainedTabItem is IActivatableTab activatableTab) {
+                        activatableTab.Activate(); // Инициирует фокус редактора (или окна на его месте).
+                    }
 
-                Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", true);
+                    Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", true);
+                }
+
                 e.Handled = true;
             }
         }
@@ -533,7 +564,9 @@ namespace TabsManagerExtension.Controls {
             _tabNavigationController = new Navigation.TabNavigationController(
                 _tabItemsSelectionCoordinator,
                 this.GetVisibleTabItems
-            );
+            ) {
+                SelectionActivationPolicy = TabSelectionActivationPolicy
+            };
             _keyboardTabNavigationExtension = new Navigation.KeyboardTabNavigationExtension(_tabNavigationController);
             _keyboardTabNavigationExtension.FocusedItemChanged += this.OnKeyboardFocusedTabItemChanged;
             _keyboardTabNavigationExtension.InputTargetRestoreRequested += this.OnKeyboardInputTargetRestoreRequested;
@@ -739,6 +772,9 @@ namespace TabsManagerExtension.Controls {
 
             var tabItem = this.FindTabItem(e.CurrentDocumentFullName);
             if (tabItem != null) {
+                // Навигация внутри редактора является внешней по отношению к панели:
+                // синхронизируем и рамку реального frame, и selection вкладки.
+                this.SetActiveFrameTabItem(tabItem);
                 tabItem.Metadata.SetFlag("IsActivatedExternally", true);
                 tabItem.IsSelected = true;
             }
@@ -759,6 +795,24 @@ namespace TabsManagerExtension.Controls {
 
             bool isMdiChild = mode != null && (VSFRAMEMODE)(int)mode == VSFRAMEMODE.VSFM_MdiChild;
             Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", isMdiChild);
+
+            // IsFrameActive — отдельное состояние от IsSelected: только оно управляет фиолетовой
+            // рамкой и должно изменяться вслед за реально активированным VS-фреймом, а не мультивыбором.
+            var activeWindow = PackageServices.Dte2.ActiveWindow;
+            TabItemBase activeFrameTabItem = null;
+            if (activeWindow?.Document != null) {
+                // Обычная документная вкладка сопоставляется по EnvDTE.Document.
+                activeFrameTabItem = this.FindTabItem(activeWindow.Document);
+            }
+            else if (activeWindow != null) {
+                // Встроенные страницы и tool windows документа не имеют и сопоставляются по Window.
+                activeFrameTabItem = this.FindTabItem(activeWindow);
+            }
+
+            // Если окно не представлено в нашей панели, не назначаем рамку произвольной вкладке.
+            if (activeFrameTabItem != null) {
+                this.SetActiveFrameTabItem(activeFrameTabItem);
+            }
 
 
             if (isMdiChild) {
@@ -839,20 +893,17 @@ namespace TabsManagerExtension.Controls {
         // ░ TabItemsSelectionCoordinator
         //
         private void OnTabItemSelectionChanged(TabItemsGroupBase group, TabItemBase tabItem, bool isSelected) {
-            var isActivatedExtarnally = tabItem.Metadata.GetFlag("IsActivatedExternally");
-            if (isActivatedExtarnally) {
+            // Выделение здесь намеренно не активирует документ. Решение об активации принимает
+            // TabNavigationController с учётом модификаторов и выбранной TabSelectionActivationPolicy.
+            // Флаг помечает одно внешнее изменение от VS; после доставки события его нужно погасить,
+            // чтобы следующий пользовательский выбор обрабатывался как обычный.
+            if (tabItem.Metadata.GetFlag("IsActivatedExternally")) {
                 tabItem.Metadata.SetFlag("IsActivatedExternally", false);
-            }
-
-            if (isSelected) {
-                // Mouse-навигация всегда сохраняет стандартную семантику, в том числе в edit mode.
-                _tabNavigationController.OnItemSelectionChanged(tabItem, isSelected, isActivatedExtarnally);
             }
         }
 
         private void OnSelectionStateChanged(Helpers.Enums.SelectionState selectionState) {
             this.IsMultipleTabSelection = selectionState == Helpers.Enums.SelectionState.Multiple;
-            _tabNavigationController.OnSelectionStateChanged(selectionState);
         }
 
 
@@ -2051,8 +2102,18 @@ namespace TabsManagerExtension.Controls {
             return _tabNavigationController.HandleKey(key, modifiers);
         }
 
-        internal void HandleTabPointerNavigation(TabItemControl source) {
-            if (this.IsTabEditMode && source.DataContext is TabItemBase tabItem) {
+        internal void HandleTabPointerNavigation(TabItemControl source, ModifierKeys modifiers) {
+            if (source.DataContext is not TabItemBase tabItem) {
+                return;
+            }
+
+            // Контроллер одинаково применяет правила выбора в обоих режимах: простой ЛКМ может
+            // активировать вкладку, а Ctrl/Shift меняют набор выделения без обязательной активации.
+            _tabNavigationController.OnPointerSelection(tabItem, modifiers);
+
+            if (this.IsTabEditMode) {
+                // Мышь также переносит пунктирный навигационный фокус, чтобы следующая стрелка
+                // продолжила движение от вкладки, на которую только что нажал пользователь.
                 _keyboardTabNavigationExtension.FocusItem(tabItem);
 
                 // Активация документа в результате клика может вернуть command target редактору
@@ -2118,11 +2179,32 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
+            // Сначала синхронизируем именно активный VS-фрейм. Это состояние независимо от
+            // PrimarySelection и гарантирует, что фиолетовая рамка не следует за мультивыбором.
+            TabItemBase activeFrameTabItem = null;
+            if (VsShell.Document.ShellWindow.IsTabWindow(activeWindow)) {
+                if (activeWindow.Document != null) {
+                    activeFrameTabItem = this.FindTabItem(activeWindow.Document);
+                }
+                else {
+                    activeFrameTabItem = this.FindTabItem(activeWindow);
+                }
+            }
+            else if (PackageServices.Dte2.ActiveDocument != null) {
+                activeFrameTabItem = this.FindTabItem(PackageServices.Dte2.ActiveDocument);
+            }
+
+            if (activeFrameTabItem != null) {
+                this.SetActiveFrameTabItem(activeFrameTabItem);
+            }
+
             var selectedTabItem = _tabItemsSelectionCoordinator.PrimarySelection?.Item;
             TabItemBase targetTabItem = null;
 
+            // Затем отдельно синхронизируем выбор. Этот путь нужен для активаций, пришедших
+            // извне панели (например, из Solution Explorer), где pointer-навигация не участвовала.
             if (VsShell.Document.ShellWindow.IsTabWindow(activeWindow)) {
-                // Document or Tool Window can be activated.
+                // В области вкладок VS может быть активен как документ, так и tool window.
                 if (activeWindow.Document == null) {
                     if (string.Equals(activeWindow.Caption, selectedTabItem?.Caption, StringComparison.OrdinalIgnoreCase)) {
                         return;
@@ -2139,7 +2221,8 @@ namespace TabsManagerExtension.Controls {
                 }
             }
             else {
-                // Only Document can be activated (for example when choose document from SolutionExplorer)
+                // Если ActiveWindow не является вкладкой, ориентируемся на ActiveDocument:
+                // например, документ мог быть выбран через Solution Explorer.
                 var activeDocument = PackageServices.Dte2.ActiveDocument;
                 if (activeDocument == null) {
                     return;
@@ -2152,7 +2235,17 @@ namespace TabsManagerExtension.Controls {
             }
 
             if (targetTabItem != null) {
+                // Меняем только выбор; актуальная фиолетовая рамка уже выставлена выше
+                // по фактическому активному фрейму и от PrimarySelection не зависит.
                 targetTabItem.IsSelected = true;
+            }
+        }
+
+        private void SetActiveFrameTabItem(TabItemBase activeTabItem) {
+            // В каждый момент только одна представленная вкладка может соответствовать
+            // активному VS-фрейму; мультивыбор на этот marker не влияет.
+            foreach (var tabItem in this.SortedTabItemsGroups.SelectMany(group => group.Items)) {
+                tabItem.Metadata.SetFlag("IsFrameActive", ReferenceEquals(tabItem, activeTabItem));
             }
         }
 
