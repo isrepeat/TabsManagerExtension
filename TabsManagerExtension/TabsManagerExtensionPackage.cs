@@ -78,6 +78,7 @@ namespace TabsManagerExtension {
 
 #if DEBUG
             this.ConfigureExperimentalStartup();
+            this.OpenDebugSolutionIfNoneLoaded();
 #endif
             this.InitializeEvents();
 
@@ -93,6 +94,9 @@ namespace TabsManagerExtension {
         }
 
 #if DEBUG
+        // Fallback используется только экспериментальной DEBUG-средой и не влияет на VSIX Release.
+        private const string DebugSolutionPath = @"C:\WORK\Projects\TabsManagerExtension - Copy\TabsManagerExtension.sln";
+
         private void ConfigureExperimentalStartup() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
@@ -107,6 +111,33 @@ namespace TabsManagerExtension {
             catch (Exception ex) {
                 Helpers.Diagnostic.Logger.LogDebug($"[Package] Не удалось настроить запуск Experimental Instance: {ex.Message}");
             }
+        }
+
+        private void OpenDebugSolutionIfNoneLoaded() {
+            // Запускаем проверку в фоне, чтобы инициализация пакета не блокировала старт IDE.
+            this.JoinableTaskFactory.RunAsync(async () => {
+                // Пакет может загрузиться в кратком состоянии NoSolution до обработки аргументов devenv.
+                // Даём штатному запуску время открыть переданное решение и вмешиваемся только в пустую IDE.
+                await Task.Delay(TimeSpan.FromSeconds(1), this.DisposalToken);
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
+
+                try {
+                    if (PackageServices.Dte2.Solution.IsOpen) {
+                        return;
+                    }
+
+                    if (!System.IO.File.Exists(DebugSolutionPath)) {
+                        Helpers.Diagnostic.Logger.LogDebug($"[Package] Debug solution не найдена: '{DebugSolutionPath}'.");
+                        return;
+                    }
+
+                    Helpers.Diagnostic.Logger.LogDebug($"[Package] Experimental Instance запущен без решения. Открываем '{DebugSolutionPath}'.");
+                    PackageServices.Dte2.Solution.Open(DebugSolutionPath);
+                }
+                catch (Exception ex) {
+                    Helpers.Diagnostic.Logger.LogDebug($"[Package] Не удалось открыть Debug solution: {ex.Message}");
+                }
+            }).FileAndForget("TabsManagerExtension/OpenDebugSolutionIfNoneLoaded");
         }
 #endif
 

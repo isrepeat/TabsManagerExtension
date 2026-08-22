@@ -141,8 +141,6 @@ namespace TabsManagerExtension.ToolWindows {
             foreach (var projectIncluder in transitiveIncludingProjects2) {
                 Helpers.Diagnostic.Logger.LogDebug($"- {projectIncluder.UniqueName}");
             };
-
-            int xx = 9;
         }
     }        
 }
