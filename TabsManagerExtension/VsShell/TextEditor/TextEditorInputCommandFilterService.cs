@@ -39,6 +39,8 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
 
         private static readonly VSConstants.VSStd97CmdID[] _trackedStd97Commands = new[] {
             VSConstants.VSStd97CmdID.Delete,
+            VSConstants.VSStd97CmdID.SelectAll,
+            VSConstants.VSStd97CmdID.Undo,
         };
 
         private IVsTextView? _currentTextView;
@@ -49,6 +51,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
         private FrameworkElement? _lastInputTarget;
         // В edit mode команды должны идти во вкладки даже после активации editor frame.
         private FrameworkElement? _forcedInputTarget;
+        private Func<Key, bool>? _forcedInputKeyAvailability;
 
         public TextEditorInputCommandFilterService() { }
 
@@ -131,7 +134,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
         }
 
 
-        public void SetForcedInputTarget(FrameworkElement? element) {
+        public void SetForcedInputTarget(FrameworkElement? element, Func<Key, bool>? keyAvailability = null) {
             if (element != null && !_trackedElements.Contains(element)) {
                 throw new InvalidOperationException("Forced input target must be registered first.");
             }
@@ -139,8 +142,10 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             // Forced target имеет приоритет над фактическим WPF-фокусом. Это позволяет оставить
             // активным документ Visual Studio, но обрабатывать навигационные клавиши панелью вкладок.
             _forcedInputTarget = element;
+            _forcedInputKeyAvailability = element == null ? null : keyAvailability;
             if (_currentFilter != null) {
                 _currentFilter.IsSpaceCommandEnabled = _forcedInputTarget != null;
+                _currentFilter.AreNavigationCommandsEnabled = _forcedInputTarget != null;
             }
 
             if (_forcedInputTarget != null || _lastInputTarget?.IsKeyboardFocusWithin == true) {
@@ -255,6 +260,8 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             var filter = new TextEditorCommandFilter(_trackedStd2Commands, _trackedStd97Commands);
             // TYPECHAR перехватывается только в edit mode, чтобы обычный ввод текста не затрагивался.
             filter.IsSpaceCommandEnabled = _forcedInputTarget != null;
+            filter.AreNavigationCommandsEnabled = _forcedInputTarget != null;
+            filter.CanInterceptNavigationKey = this.CanInterceptNavigationKey;
             int result = view.AddCommandFilter(filter, out IOleCommandTarget next);
 
             if (result == VSConstants.S_OK) {
@@ -291,6 +298,11 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             _currentTextView = null;
             _currentFilter = null;
         }
+
+        private bool CanInterceptNavigationKey(Key key) {
+            return _forcedInputTarget != null && (_forcedInputKeyAvailability?.Invoke(key) ?? true);
+        }
+
 
 
         private void RedirectKeyInput(FrameworkElement target, Key key) {

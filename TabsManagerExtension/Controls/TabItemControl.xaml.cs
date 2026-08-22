@@ -142,7 +142,7 @@ namespace TabsManagerExtension.Controls {
             }
 
             var owner = Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this);
-            if (owner?.HandleTabEditKey(this, e.Key, Keyboard.Modifiers) == true) {
+            if (owner?.HandleTabEditKey(e.Key, Keyboard.Modifiers) == true) {
                 e.Handled = true;
             }
         }

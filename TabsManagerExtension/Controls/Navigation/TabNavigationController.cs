@@ -121,5 +121,13 @@ namespace TabsManagerExtension.Controls.Navigation {
                 activatableTab.Activate();
             }
         }
+
+        public void SelectAll() {
+            foreach (var item in this.Items) {
+                if (!item.IsSelected) {
+                    this.SetSelectionWithoutActivation(item, true, ModifierKeys.Control);
+                }
+            }
+        }
     }
 }

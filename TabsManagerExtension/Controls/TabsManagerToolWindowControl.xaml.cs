@@ -154,8 +154,18 @@ namespace TabsManagerExtension.Controls {
         private DispatcherTimer? _tabsManagerStateTimer;
         private FileSystemWatcher _fileWatcher;
         private bool _isRestoringToolWindows;
+        // Во время Ctrl+Z активация открываемых документов не должна учитывать физически
+        // удерживаемый Ctrl и добавлять вкладки к существующему мультивыбору.
+        private bool _isRestoringClosedTabs;
         private bool _isSolutionClosing;
         private string? _openDocumentsLoadedForSolution;
+        // Одна запись стека соответствует одному пользовательскому закрытию. Поэтому вкладки,
+        // закрытые через мультивыбор, восстанавливаются одним нажатием Ctrl+Z.
+        private readonly Stack<ClosedTabsOperation> _closedTabsHistory = new();
+        // Закрытие через CloseTabItems сначала записывает всю операцию. Ключи не дают событиям
+        // DocumentClosing/WindowClosing повторно создать по одной записи для каждой вкладки.
+        private readonly HashSet<string> _tabsBeingClosed = new(StringComparer.OrdinalIgnoreCase);
+        private const int ClosedTabsHistoryCapacity = 50;
 
         private Helpers.Collections.GroupsSelectionCoordinator<TabItemsGroupBase, TabItemBase> _tabItemsSelectionCoordinator;
         private Navigation.TabNavigationController _tabNavigationController;
@@ -380,14 +390,9 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
-            // ListView может оставлять WPF-фокус на своём контейнере или на переключателе режима.
-            // Поэтому сначала используем фактический фокус, а затем сохранённую focused-вкладку edit mode.
-            var focusedElement = Keyboard.FocusedElement as DependencyObject;
-            var tabItemControl = focusedElement as TabItemControl;
-            tabItemControl ??= focusedElement == null ? null : Helpers.VisualTree.FindParentByType<TabItemControl>(focusedElement);
-            tabItemControl ??= this.FindTabItemControl(_keyboardTabNavigationExtension?.FocusedItem);
-
-            if (tabItemControl != null && this.HandleTabEditKey(tabItemControl, e.Key, Keyboard.Modifiers)) {
+            // Корневой обработчик не зависит от существования визуального TabItemControl:
+            // Ctrl+Z остаётся доступен и после удаления последней вкладки.
+            if (this.HandleTabEditKey(e.Key, Keyboard.Modifiers)) {
                 e.Handled = true;
             }
         }
@@ -400,7 +405,8 @@ namespace TabsManagerExtension.Controls {
             // PART_TabListHost не становится отдельным command target. Пока активен edit mode,
             // перехватываем навигационные команды в IVsTextView и направляем их в этот контрол.
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.SetForcedInputTarget(
-                this.IsTabEditMode ? this : null
+                this.IsTabEditMode ? this : null,
+                this.IsTabEditMode ? this.CanHandleRedirectedNavigationKey : null
             );
         }
 
@@ -651,6 +657,11 @@ namespace TabsManagerExtension.Controls {
 
             var tabItemDocument = this.FindTabItem(document);
             if (tabItemDocument != null) {
+                // Если закрытие пришло не из CloseTabItems, оно было инициировано самой VS
+                // (крестик, команда меню и т.п.) и должно попасть в историю отдельной операцией.
+                if (!_isSolutionClosing && !_tabsBeingClosed.Remove(this.GetHistoryKey(tabItemDocument))) {
+                    this.PushClosedTabsOperation(new[] { this.CreateClosedTabEntry(tabItemDocument) });
+                }
                 this.RemoveTabItemFromGroups(tabItemDocument);
             }
             else {
@@ -683,7 +694,7 @@ namespace TabsManagerExtension.Controls {
                 tabItem ??= this.AddTabItemToAutoDeterminedGroupIfMissing(new TabItemWindow(activatedShellWindow));
             }
 
-            tabItem.IsSelected = true;
+            this.SelectActivatedTabItem(tabItem);
 
             if (tabItem is TabItemWindow) {
                 this.UpdateWindowTabsInfo();
@@ -698,6 +709,12 @@ namespace TabsManagerExtension.Controls {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             Helpers.Diagnostic.Logger.LogParam($"closingWindow.Caption = {closingWindow?.Caption}");
+            var tabItemWindow = this.FindTabItem(closingWindow);
+            // У tool window нет DocumentClosing, поэтому внешнее закрытие отслеживается здесь.
+            // Для закрытия через панель ключ уже находится в _tabsBeingClosed.
+            if (tabItemWindow != null && !_isSolutionClosing && !_tabsBeingClosed.Remove(this.GetHistoryKey(tabItemWindow))) {
+                this.PushClosedTabsOperation(new[] { this.CreateClosedTabEntry(tabItemWindow) });
+            }
             VsixThreadHelper.RunOnUiThread(Dispatcher, this.SaveOpenToolWindows, DispatcherPriority.Background);
         }
 
@@ -710,6 +727,8 @@ namespace TabsManagerExtension.Controls {
             // Иначе WindowClosing в конце завершения IDE перезапишет историю пустым списком.
             this.SaveOpenToolWindows();
             _isSolutionClosing = true;
+            _closedTabsHistory.Clear();
+            _tabsBeingClosed.Clear();
 
             // TODO: try replace with this.Unload()
             this.SortedTabItemsGroups.Clear();
@@ -776,7 +795,7 @@ namespace TabsManagerExtension.Controls {
                 // синхронизируем и рамку реального frame, и selection вкладки.
                 this.SetActiveFrameTabItem(tabItem);
                 tabItem.Metadata.SetFlag("IsActivatedExternally", true);
-                tabItem.IsSelected = true;
+                this.SelectActivatedTabItem(tabItem);
             }
         }
 
@@ -1082,6 +1101,20 @@ namespace TabsManagerExtension.Controls {
         private void CloseTabItems(IReadOnlyList<TabItemBase> tabItems) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            // Снимок создаётся до вызова DTE Close(): DocumentClosing приходит синхронно и сразу
+            // удаляет TabItem вместе с информацией о его исходной группе.
+            var entries = tabItems
+                .Select(this.CreateClosedTabEntry)
+                .ToList();
+            if (entries.Count > 0) {
+                this.PushClosedTabsOperation(entries);
+                foreach (var tabItem in tabItems) {
+                    // Помечаем всю пачку заранее: каждое последующее событие закрытия только
+                    // погасит свой ключ и не раздробит одну операцию на несколько undo-шагов.
+                    _tabsBeingClosed.Add(this.GetHistoryKey(tabItem));
+                }
+            }
+
             // Используем заранее созданный снимок: DocumentClosing синхронно удаляет элементы
             // из групп и одновременно перестраивает текущее выделение.
             foreach (var tabItem in tabItems) {
@@ -1100,6 +1133,7 @@ namespace TabsManagerExtension.Controls {
                     }
                 }
                 catch (Exception ex) {
+                    _tabsBeingClosed.Remove(this.GetHistoryKey(tabItem));
                     Helpers.Diagnostic.Logger.LogError($"Failed to close tab '{tabItem.Caption}': {ex}");
                 }
             }
@@ -2007,6 +2041,173 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+
+        //
+        // ░ История закрытых вкладок
+        //
+        private ClosedTabEntry CreateClosedTabEntry(TabItemBase tabItem) {
+            // В историю не кладём COM-объекты EnvDTE: после закрытия они становятся недействительными.
+            // Для повторного открытия достаточно стабильного пути/WindowId и описания группы.
+            var current = this.FindTabItemWithGroup(tabItem);
+            var group = current?.Group;
+
+            return new ClosedTabEntry {
+                Kind = tabItem is TabItemWindow ? ClosedTabKind.ToolWindow : ClosedTabKind.Document,
+                FullName = tabItem.FullName,
+                WindowId = (tabItem as TabItemWindow)?.WindowId,
+                GroupName = group?.GroupName ?? string.Empty,
+                GroupKind = this.GetClosedTabGroupKind(group)
+            };
+        }
+
+        private void PushClosedTabsOperation(IEnumerable<ClosedTabEntry> entries) {
+            var operationEntries = entries.ToList();
+            if (operationEntries.Count == 0) {
+                return;
+            }
+
+            _closedTabsHistory.Push(new ClosedTabsOperation(operationEntries));
+            if (_closedTabsHistory.Count <= ClosedTabsHistoryCapacity) {
+                return;
+            }
+
+            // Stack не умеет удалять самый старый элемент, поэтому пересобираем его без хвоста.
+            var retainedOperations = _closedTabsHistory.Take(ClosedTabsHistoryCapacity).Reverse().ToList();
+            _closedTabsHistory.Clear();
+            foreach (var operation in retainedOperations) {
+                _closedTabsHistory.Push(operation);
+            }
+        }
+
+        private void RestoreLastClosedTabsOperation() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (_closedTabsHistory.Count == 0) {
+                return;
+            }
+
+            var operation = _closedTabsHistory.Pop();
+            // OpenFile/Show активируют каждый восстановленный frame и синхронно вызывают наши
+            // DTE-обработчики. Флаг заставляет их игнорировать Ctrl от комбинации Ctrl+Z.
+            _isRestoringClosedTabs = true;
+            try {
+                foreach (var entry in operation.Entries) {
+                    try {
+                        TabItemBase? restoredTabItem = entry.Kind == ClosedTabKind.Document
+                            ? this.RestoreClosedDocument(entry)
+                            : this.RestoreClosedToolWindow(entry);
+
+                        if (restoredTabItem != null) {
+                            this.MoveRestoredTabToOriginalGroup(restoredTabItem, entry);
+                        }
+                    }
+                    catch (Exception ex) {
+                        Helpers.Diagnostic.Logger.LogError($"Failed to restore closed tab '{entry.FullName}': {ex}");
+                    }
+                }
+            }
+            finally {
+                _isRestoringClosedTabs = false;
+            }
+
+            _keyboardTabNavigationExtension.RestoreInputTarget();
+        }
+
+        private TabItemDocument? RestoreClosedDocument(ClosedTabEntry entry) {
+            // Повторный вызов безопасен: уже открытый документ не открываем ещё раз, а только
+            // возвращаем существующий TabItem в сохранённую группу.
+            var existingTabItem = this.FindTabItem(entry.FullName);
+            if (existingTabItem != null) {
+                return existingTabItem;
+            }
+            if (!File.Exists(entry.FullName)) {
+                Helpers.Diagnostic.Logger.LogWarning($"Cannot restore deleted document '{entry.FullName}'");
+                return null;
+            }
+
+            var window = PackageServices.Dte2.ItemOperations.OpenFile(entry.FullName);
+            // Обычно OnDocumentOpened уже успевает добавить вкладку синхронно. Поиск по пути —
+            // запасной вариант для видов редактора, у которых OpenFile не вернул Document.
+            var restoredTabItem = window?.Document == null ? null : this.FindTabItem(window.Document);
+            restoredTabItem ??= this.FindTabItem(entry.FullName);
+            return restoredTabItem;
+        }
+
+        private TabItemWindow? RestoreClosedToolWindow(ClosedTabEntry entry) {
+            // Persistence GUID позволяет заново создать tool window без хранения устаревшего
+            // EnvDTE.Window из момента закрытия.
+            if (!Guid.TryParse(entry.WindowId, out var persistenceGuid)) {
+                return null;
+            }
+
+            var uiShell = Package.GetGlobalService(typeof(SVsUIShell)) as IVsUIShell;
+            if (uiShell == null) {
+                return null;
+            }
+
+            int result = uiShell.FindToolWindow((uint)__VSFINDTOOLWIN.FTW_fForceCreate, ref persistenceGuid, out var frame);
+            if (ErrorHandler.Failed(result) || frame == null) {
+                return null;
+            }
+
+            frame.Show();
+            this.UpdateWindowTabsInfo();
+            return this.SortedTabItemsGroups
+                .SelectMany(group => group.Items)
+                .OfType<TabItemWindow>()
+                .FirstOrDefault(item => string.Equals(item.WindowId, entry.WindowId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void MoveRestoredTabToOriginalGroup(TabItemBase tabItem, ClosedTabEntry entry) {
+            // OnDocumentOpened сначала помещает документ в автоматически вычисленную группу.
+            // После этого переносим тот же объект в группу, сохранённую перед закрытием.
+            var current = this.FindTabItemWithGroup(tabItem);
+            if (current != null) {
+                this.RemoveTabItemFromGroup(current.Value.Item, current.Value.Group);
+            }
+
+            this.AddTabItemToGroupIfMissing(tabItem, this.CreateRestoredGroup(entry));
+            if (tabItem is TabItemDocument tabItemDocument && entry.GroupKind == ClosedTabGroupKind.Pinned) {
+                // Одного UI-флага недостаточно: закрепляем также настоящий frame Visual Studio.
+                tabItemDocument.ShellDocument.OpenDocumentAsPinned();
+            }
+        }
+
+        private TabItemsGroupBase CreateRestoredGroup(ClosedTabEntry entry) {
+            return entry.GroupKind switch {
+                ClosedTabGroupKind.Preview => new TabItemsPreviewGroup(),
+                ClosedTabGroupKind.Pinned => new TabItemsPinnedGroup(entry.GroupName),
+                _ => new TabItemsDefaultGroup(entry.GroupName)
+            };
+        }
+
+        private ClosedTabGroupKind GetClosedTabGroupKind(TabItemsGroupBase? group) {
+            if (group is TabItemsPreviewGroup) {
+                return ClosedTabGroupKind.Preview;
+            }
+            if (group is TabItemsPinnedGroup) {
+                return ClosedTabGroupKind.Pinned;
+            }
+            return ClosedTabGroupKind.Default;
+        }
+
+        private string GetHistoryKey(TabItemBase tabItem) {
+            // Префикс исключает случайное совпадение пути документа с идентификатором окна.
+            return tabItem is TabItemWindow tabItemWindow
+                ? $"window:{tabItemWindow.WindowId}"
+                : $"document:{tabItem.FullName}";
+        }
+
+        private void SelectActivatedTabItem(TabItemBase tabItem) {
+            if (_isRestoringClosedTabs) {
+                // KeyUp для Ctrl+Z не может обработаться, пока синхронное восстановление не завершено.
+                // Явно задаём обычный одиночный выбор и не читаем удерживаемый Keyboard.Modifiers.
+                _tabNavigationController.SetSelectionWithoutActivation(tabItem, true, ModifierKeys.None);
+                return;
+            }
+
+            tabItem.IsSelected = true;
+        }
+
         private bool HasGroup<T>() where T : TabItemsGroupBase {
             return this.SortedTabItemsGroups.OfType<T>().Any();
         }
@@ -2094,12 +2295,66 @@ namespace TabsManagerExtension.Controls {
             _tabItemControls.Remove(control);
         }
 
-        internal bool HandleTabEditKey(TabItemControl source, Key key, ModifierKeys modifiers) {
+        internal bool HandleTabEditKey(Key key, ModifierKeys modifiers) {
             if (!this.IsTabEditMode) {
                 return false;
             }
 
+            bool isControlPressed = (modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+            if (isControlPressed && key == Key.A) {
+                // SelectAll использует coordinator, чтобы корректно обновить общий selection state
+                // и все визуальные состояния групп, а не только IsSelected отдельных моделей.
+                _tabNavigationController.SelectAll();
+                _keyboardTabNavigationExtension.RestoreInputTarget();
+                return true;
+            }
+
+            if (key == Key.Delete && modifiers == ModifierKeys.None) {
+                var focusedItem = _keyboardTabNavigationExtension.FocusedItem;
+                if (focusedItem == null) {
+                    return true;
+                }
+
+                var selectedItems = _tabItemsSelectionCoordinator.SelectedItems;
+                // Если навигационный фокус входит в мультивыбор, Delete относится ко всей пачке.
+                // Иначе закрывается только пунктирно сфокусированная вкладка.
+                var itemsToClose = focusedItem.IsSelected && selectedItems.Count > 1
+                    ? selectedItems.Select(entry => entry.Item).ToList()
+                    : new List<TabItemBase> { focusedItem };
+                this.CloseTabItems(itemsToClose);
+
+                var nextFocusedItem = this.GetVisibleTabItems().FirstOrDefault();
+                if (nextFocusedItem != null) {
+                    // Закрытие активного frame может вернуть command target редактору. Повторно
+                    // закрепляем навигационный фокус на оставшейся вкладке панели.
+                    _keyboardTabNavigationExtension.FocusItem(nextFocusedItem);
+                    _keyboardTabNavigationExtension.RestoreInputTarget();
+                }
+                return true;
+            }
+
+            if (isControlPressed && key == Key.Z) {
+                // Пустая история не должна поглощать стандартный Undo редактора.
+                if (_closedTabsHistory.Count == 0) {
+                    return false;
+                }
+
+                this.RestoreLastClosedTabsOperation();
+                return true;
+            }
+
             return _tabNavigationController.HandleKey(key, modifiers);
+        }
+
+        private bool CanHandleRedirectedNavigationKey(Key key) {
+            // Visual Studio разрешает глобальные команды до WPF PreviewKeyDown. Поэтому OLE-фильтр
+            // спрашивает контрол заранее, кому принадлежит команда: панели или редактору.
+            if (!this.IsKeyboardFocusWithin) {
+                return false;
+            }
+
+            // Ctrl+Z принадлежит панели только при наличии реальной операции восстановления.
+            return key != Key.Z || _closedTabsHistory.Count > 0;
         }
 
         internal void HandleTabPointerNavigation(TabItemControl source, ModifierKeys modifiers) {
@@ -2237,7 +2492,7 @@ namespace TabsManagerExtension.Controls {
             if (targetTabItem != null) {
                 // Меняем только выбор; актуальная фиолетовая рамка уже выставлена выше
                 // по фактическому активному фрейму и от PrimarySelection не зависит.
-                targetTabItem.IsSelected = true;
+                this.SelectActivatedTabItem(targetTabItem);
             }
         }
 
@@ -2330,6 +2585,35 @@ namespace TabsManagerExtension.Controls {
             string extension = Path.GetExtension(fullPath);
             return extension.Equals(".TMP", StringComparison.OrdinalIgnoreCase) ||
                    fullPath.Contains("~") && fullPath.Contains(".TMP");
+        }
+
+        private enum ClosedTabKind {
+            Document,
+            ToolWindow
+        }
+
+        private enum ClosedTabGroupKind {
+            Default,
+            Pinned,
+            Preview
+        }
+
+        private sealed class ClosedTabEntry {
+            // Запись содержит только устойчивые данные, пригодные после уничтожения VS frame.
+            public ClosedTabKind Kind { get; set; }
+            public string FullName { get; set; } = string.Empty;
+            public string? WindowId { get; set; }
+            public string GroupName { get; set; } = string.Empty;
+            public ClosedTabGroupKind GroupKind { get; set; }
+        }
+
+        private sealed class ClosedTabsOperation {
+            // Entries сохраняет границу пользовательской операции для атомарного Ctrl+Z.
+            public IReadOnlyList<ClosedTabEntry> Entries { get; }
+
+            public ClosedTabsOperation(IReadOnlyList<ClosedTabEntry> entries) {
+                this.Entries = entries;
+            }
         }
     }
 }
