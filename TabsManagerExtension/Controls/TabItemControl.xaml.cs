@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Threading;
 using Helpers.Ex;
 
 namespace TabsManagerExtension.Controls {
@@ -111,8 +112,31 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        private bool _isRenaming;
+        public bool IsRenaming {
+            get => _isRenaming;
+            private set {
+                if (_isRenaming != value) {
+                    _isRenaming = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
+        private string _renameText = string.Empty;
+        public string RenameText {
+            get => _renameText;
+            set {
+                if (_renameText != value) {
+                    _renameText = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
 
         private WeakReference<MenuControl>? _cachedWeakMenuControl;
+        private bool _isCompletingRename;
 
         public TabItemControl() {
             this.InitializeComponent();
@@ -137,7 +161,7 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnPreviewKeyDown(object sender, KeyEventArgs e) {
-            if (!this.IsEditMode) {
+            if (!this.IsEditMode || this.IsRenaming) {
                 return;
             }
 
@@ -147,7 +171,66 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        public void BeginRename() {
+            this.RenameText = this.Title;
+            this.IsRenaming = true;
+            this.Dispatcher.BeginInvoke(new Action(() => {
+                this.RenameTextBox.Focus();
+                Keyboard.Focus(this.RenameTextBox);
+                this.RenameTextBox.SelectAll();
+            }), DispatcherPriority.Input);
+        }
+
+        private void RenameTextBox_OnKeyDown(object sender, KeyEventArgs e) {
+            if (e.Key == Key.Enter) {
+                this.CompleteRename();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape) {
+                this.IsRenaming = false;
+                this.RestoreOwnerInputTarget();
+                e.Handled = true;
+            }
+        }
+
+        private void RenameTextBox_OnLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) {
+            this.CompleteRename();
+        }
+
+        private void CompleteRename() {
+            if (!this.IsRenaming || _isCompletingRename) {
+                return;
+            }
+
+            _isCompletingRename = true;
+            try {
+                var owner = Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this);
+                owner?.TryRenameTabItem(this, this.RenameText);
+
+                // Диалог ошибки сам временно забирает фокус и повторно вызывает LostKeyboardFocus.
+                // Всегда завершаем F2-сценарий после одной попытки, чтобы не зациклить проверку.
+                this.IsRenaming = false;
+                this.RestoreOwnerInputTarget();
+            }
+            finally {
+                _isCompletingRename = false;
+            }
+        }
+
+        private void RestoreOwnerInputTarget() {
+            Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.RestoreTabNavigationInputTarget();
+        }
+
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
+            // Клик внутри поля нужен только для установки каретки/выделения. Не запускаем
+            // навигацию вкладки, иначе она забирает фокус и преждевременно завершает rename.
+            if (this.IsRenaming &&
+                e.OriginalSource is DependencyObject renameSource &&
+                (ReferenceEquals(renameSource, this.RenameTextBox) ||
+                 Helpers.VisualTree.FindParentByType<TextBox>(renameSource) != null)) {
+                return;
+            }
+
             // Кнопки pin/close/keep-open находятся внутри вкладки, но их клик не является
             // выбором самой вкладки и не должен менять активный VS-фрейм.
             if (e.OriginalSource is Button ||

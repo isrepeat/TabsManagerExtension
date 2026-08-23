@@ -25,7 +25,9 @@ namespace TabsManagerExtension.State.Document {
         
         private string _documenFullName;
         private ObservableCollection<DocumentProjectReferencesInfo.RefEntry> _references = new();
+        private IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> _availableReferencesIncludingSingleProject = Array.Empty<DocumentProjectReferencesInfo.RefEntry>();
         private Helpers.Time.DelayedEventsHandler _delayedEventsHandler;
+        private bool _isInitialized;
 
         public DocumentProjectReferencesInfo(string documenFullName) {
             _documenFullName = documenFullName;
@@ -39,13 +41,18 @@ namespace TabsManagerExtension.State.Document {
 
 
         public void UpdateReferences() {
-            foreach (var reference in _references) {
+            foreach (var reference in _availableReferencesIncludingSingleProject) {
                 reference.ProjectEntry.BaseViewModel.SharedItemsChanged.Remove(this.OnSharedItemsChanged);
                 reference.ProjectEntry.BaseViewModel.ExternalIncludesChanged.Remove(this.OnExternalIncludesChanged);
             }
             _references.Clear();
 
-            var refEntries = this.BuildReferences();
+            // Анализатор решения перестраивает свои таблицы по событиям решения и проектов.
+            // Здесь только читаем готовые таблицы и обновляем локальный кэш документа.
+            _availableReferencesIncludingSingleProject = this.BuildReferences(includeSingleProject: true);
+            var refEntries = _availableReferencesIncludingSingleProject.Count < 2
+                ? Array.Empty<DocumentProjectReferencesInfo.RefEntry>()
+                : _availableReferencesIncludingSingleProject;
 
             foreach (var refEntry in refEntries) {
                 _references.Add(refEntry);
@@ -54,24 +61,39 @@ namespace TabsManagerExtension.State.Document {
             // Подписываемся на изменения коллекций ExternalIncludes и SharedItems
             // поскольку они могут очищаться при выгрузке проектов и нам нужно заново
             // обновлять текущие элементы соотвутствующие новым значениям и этих коллекций.
-            foreach (var reference in _references) {
+            foreach (var reference in _availableReferencesIncludingSingleProject) {
                 reference.ProjectEntry.BaseViewModel.ExternalIncludesChanged.Add(this.OnExternalIncludesChanged);
                 reference.ProjectEntry.BaseViewModel.SharedItemsChanged.Add(this.OnSharedItemsChanged);
             }
 
             base.OnPropertyChanged(nameof(this.References));
             this.UpdateProperty(nameof(this.HasUnloadedProjects));
+            _isInitialized = true;
         }
 
 
         public IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> GetAvailableReferences(bool includeSingleProject = false) {
             ThreadHelper.ThrowIfNotOnUIThread();
-            return this.BuildReferences(includeSingleProject);
+
+            if (!_isInitialized) {
+                this.UpdateReferences();
+            }
+
+            return includeSingleProject
+                ? _availableReferencesIncludingSingleProject
+                : _readonlyReferences;
         }
 
 
         public void Clear() {
+            foreach (var reference in _availableReferencesIncludingSingleProject) {
+                reference.ProjectEntry.BaseViewModel.SharedItemsChanged.Remove(this.OnSharedItemsChanged);
+                reference.ProjectEntry.BaseViewModel.ExternalIncludesChanged.Remove(this.OnExternalIncludesChanged);
+            }
+
             _references.Clear();
+            _availableReferencesIncludingSingleProject = Array.Empty<DocumentProjectReferencesInfo.RefEntry>();
+            _isInitialized = false;
         }
 
 
@@ -108,16 +130,7 @@ namespace TabsManagerExtension.State.Document {
 
 
         private void OnRefreshReferences() {
-            var newRefEntries = this.BuildReferences();
-
-            foreach (var newRefEntry in newRefEntries) {
-                var existRefEntry = _references.FirstOrDefault(r => r.ProjectEntry.Equals(newRefEntry.ProjectEntry));
-                if (existRefEntry != null) {
-                    existRefEntry.UpdateDocumentEntry(newRefEntry.DocumentEntryBase);
-                }
-            }
-
-            this.UpdateProperty(nameof(this.HasUnloadedProjects));
+            this.UpdateReferences();
         }
 
 
@@ -142,8 +155,6 @@ namespace TabsManagerExtension.State.Document {
             }
 
             var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
-            solutionHierarchyAnalyzer.AnalyzeExternalIncludes();
-            solutionHierarchyAnalyzer.AnalyzeDocuments();
 
             // Получаем все проекты, которые знают про этот файл.
             var externalIncludesSolutionProjectNodes = solutionHierarchyAnalyzer.ExternalIncludeRepresentationsTable

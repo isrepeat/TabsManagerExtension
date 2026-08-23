@@ -11,7 +11,7 @@
                          xmlns:helpers="clr-namespace:Helpers"
                          xmlns:helpersControls="clr-namespace:Helpers.Controls"
                          x:Name="__TabsManagerToolWindowControl"
-                         Background="#1F1F1F"
+                         Background="{DynamicResource AppTabsPanelBackgroundBrush}"
                          Foreground="#d4d4d4"
                          >
     <UserControl.Resources>
@@ -38,16 +38,8 @@
                             <Border Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="1">
-                                <Path Width="14"
-                                      Height="10"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"
-                                      Data="M 0,1 L 14,1 M 0,5 L 14,5 M 0,9 L 14,9"
-                                      Stroke="{TemplateBinding Foreground}"
-                                      StrokeThickness="1.4"
-                                      StrokeStartLineCap="Square"
-                                      StrokeEndLineCap="Square"
-                                      Stretch="None" />
+                                <Path Style="{StaticResource Icons/TabsEditModeStyle}"
+                                      Stroke="{TemplateBinding Foreground}" />
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -80,11 +72,7 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="1">
-                                <TextBlock HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           FontFamily="Segoe MDL2 Assets"
-                                           FontSize="13"
-                                           Text="&#xE713;" />
+                                <TextBlock Style="{StaticResource Icons/TabsSettingsStyle}" />
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -103,7 +91,7 @@
 
 
             <Style x:Key="TabsSettingsPanelStyle" TargetType="ContentControl">
-                <Setter Property="Background" Value="#333333" />
+                <Setter Property="Background" Value="{StaticResource AppTabsPanelBackgroundBrush}" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ContentControl">
@@ -113,18 +101,10 @@
                                            Height="2"
                                            VerticalAlignment="Top"
                                            HorizontalAlignment="Stretch"
-                                           Fill="{StaticResource AppAccentNonActiveLowBrush}"
+                                           Fill="{StaticResource AppTabsPanelSeparatorBrush}"
                                            />
                                 <ContentPresenter />
                             </Grid>
-                            <ControlTemplate.Triggers>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding [TextEditorFrameFocused], Source={x:Static helpers:GlobalFlags.Metadata}}" Value="True" />
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter TargetName="TopBorder" Property="Fill" Value="{StaticResource AppAccentBrush}" />
-                                </MultiDataTrigger>
-                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
@@ -139,16 +119,11 @@
             <DataTemplate x:Key="CloseButton_PrimarySlotTemplate">
                 <Button Style="{StaticResource TabItemControlPanelButtonStyle}"
                         ToolTip="Close tab"
+                        MouseEnter="CloseButton_MouseEnter"
                         Command="{Binding OnCloseTabItemCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
                         CommandParameter="{Binding}">
-                    <Path Width="16"
-                          Height="16"
-                          Data="M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5"
-                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="0.8"
-                          StrokeStartLineCap="Round"
-                          StrokeEndLineCap="Round"
-                          Stretch="None" />
+                    <Path Style="{StaticResource Icons/CloseTabStyle}"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                 </Button>
             </DataTemplate>
             <DataTemplate x:Key="PinButton_SecondarySlotTemplate">
@@ -156,15 +131,8 @@
                         ToolTip="Pin tab"
                         Command="{Binding OnPinTabItemCommand, RelativeSource={RelativeSource AncestorType=localControls:TabsManagerToolWindowControl}}"
                         CommandParameter="{Binding}">
-                    <Path Width="16"
-                          Height="16"
-                          Data="M 9.5,2.5 L 13.5,6.5 L 11.5,7.5 L 9.5,9.5 L 8.5,12.5 L 3.5,7.5 L 6.5,6.5 L 8.5,4.5 Z M 5.5,10.5 L 2.5,13.5"
-                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="0.8"
-                          StrokeStartLineCap="Round"
-                          StrokeEndLineCap="Round"
-                          StrokeLineJoin="Round"
-                          Stretch="None" />
+                    <Path Style="{StaticResource Icons/PinTabStyle}"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                 </Button>
             </DataTemplate>
             <DataTemplate x:Key="UnpinButton_SecondarySlotTemplate">
@@ -172,16 +140,9 @@
                         ToolTip="Unpin tab"
                         Command="{Binding OnUnpinTabItemCommand, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                         CommandParameter="{Binding}">
-                    <Path Width="16"
-                          Height="16"
-                          Data="M 9.5,2.5 L 13.5,6.5 L 11.5,7.5 L 9.5,9.5 L 8.5,12.5 L 3.5,7.5 L 6.5,6.5 L 8.5,4.5 Z M 5.5,10.5 L 2.5,13.5"
+                    <Path Style="{StaticResource Icons/UnpinTabStyle}"
                           Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="0.8"
-                          StrokeStartLineCap="Round"
-                          StrokeEndLineCap="Round"
-                          StrokeLineJoin="Round"
-                          Stretch="None" />
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                 </Button>
             </DataTemplate>
             <DataTemplate x:Key="PreviewButton_SecondarySlotTemplate">
@@ -189,15 +150,8 @@
                         ToolTip="Keep Tab Open (Ctrl+Alt+Home)"
                         Command="{Binding OnKeepOpenedTabItemCommand, RelativeSource={RelativeSource AncestorType={x:Type localControls:TabsManagerToolWindowControl}}}"
                         CommandParameter="{Binding}">
-                    <Path Width="16"
-                          Height="16"
-                          Data="M 6.5,3.5 L 2.5,7.5 L 6.5,11.5 M 2.5,7.5 L 9.5,7.5 C 12.3,7.5 13.5,9.2 13.5,12.5"
-                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="0.8"
-                          StrokeStartLineCap="Round"
-                          StrokeEndLineCap="Round"
-                          StrokeLineJoin="Round"
-                          Stretch="None" />
+                    <Path Style="{StaticResource Icons/KeepOpenTabStyle}"
+                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                 </Button>
             </DataTemplate>
 

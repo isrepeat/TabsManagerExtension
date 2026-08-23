@@ -14,6 +14,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="../Styles/BrushResources.xaml"/>
+                <ResourceDictionary Source="../Styles/IconResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
             <Style x:Key="SelectableCheckBoxContainerStyle" TargetType="CheckBox">
@@ -35,6 +36,7 @@
                                         Background="{TemplateBinding Background}"
                                         BorderBrush="{TemplateBinding BorderBrush}"
                                         BorderThickness="1"
+                                        CornerRadius="4"
                                         IsHitTestVisible="True">
                                     <ContentPresenter />
                                 </Border>
@@ -43,14 +45,22 @@
                                            IsHitTestVisible="False"
                                            SnapsToDevicePixels="True"
                                            Stroke="#FF808080"
-                                           StrokeThickness="1"
-                                           StrokeDashArray="2,2"
+                                           StrokeThickness="1.2"
+                                           StrokeDashArray="3,4"
+                                           RadiusX="4"
+                                           RadiusY="4"
                                            Visibility="Collapsed" />
                             </Grid>
                             <ControlTemplate.Triggers>
-                                <DataTrigger Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True">
+                                <!-- Активный VS-фрейм всегда сохраняет сплошную серую рамку;
+                                     пунктир показываем только на другой навигационной вкладке. -->
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True" />
+                                        <Condition Binding="{Binding Metadata[IsFrameActive]}" Value="False" />
+                                    </MultiDataTrigger.Conditions>
                                     <Setter TargetName="KeyboardNavigationBorder" Property="Visibility" Value="Visible" />
-                                </DataTrigger>
+                                </MultiDataTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
@@ -79,14 +89,27 @@
                         <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
                     </MultiDataTrigger>
 
-                    <!-- Фиолетовая рамка принадлежит фактически открытому VS-фрейму, а не selection. -->
+                    <!-- Открытый VS-фрейм оформляется как стандартная вкладка: нейтральная
+                         сплошная рамка и слегка приподнятый относительно панели фон. -->
                     <DataTrigger Binding="{Binding Metadata[IsFrameActive]}" Value="True">
-                        <Setter Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+                        <Setter Property="Background" Value="{StaticResource AppTabActiveBackgroundBrush}" />
+                        <Setter Property="BorderBrush" Value="{StaticResource AppTabActiveBorderBrush}" />
                     </DataTrigger>
 
-                    <!-- Пунктирный overlay рисуется отдельно, поэтому основную рамку здесь скрываем. -->
-                    <DataTrigger Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True">
+                    <!-- Для неактивной навигационной вкладки основную рамку скрывает пунктирный
+                         overlay. Активная вкладка продолжает использовать сплошную рамку выше. -->
+                    <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsEditFocused, ElementName=__TabItemControl}" Value="True" />
+                            <Condition Binding="{Binding Metadata[IsFrameActive]}" Value="False" />
+                        </MultiDataTrigger.Conditions>
                         <Setter Property="BorderBrush" Value="Transparent" />
+                    </MultiDataTrigger>
+
+                    <!-- Во время inline rename hover не должен подсвечивать контейнер вкладки:
+                         визуально активным элементом теперь является само поле ввода. -->
+                    <DataTrigger Binding="{Binding IsRenaming, ElementName=__TabItemControl}" Value="True">
+                        <Setter Property="Background" Value="Transparent" />
                     </DataTrigger>
 
                 </Style.Triggers>
@@ -103,6 +126,11 @@
                         </MultiDataTrigger.Conditions>
                         <Setter Property="Visibility" Value="Collapsed" />
                     </MultiDataTrigger>
+                    <!-- Rename занимает всю строку заголовка, поэтому временно скрываем
+                         pin/keep-open/close независимо от pinned и preview-состояния. -->
+                    <DataTrigger Binding="{Binding IsRenaming, ElementName=__TabItemControl}" Value="True">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
                 </Style.Triggers>
             </Style>
 
@@ -137,39 +165,29 @@
 
                 <!-- Галочка. В обычном режиме контейнер схлопнут и не занимает место перед заголовком. -->
                 <Grid Grid.Column="0"
-                      Width="26">
+                      Width="16">
                     <Grid.Style>
                         <Style TargetType="Grid">
-                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Setter Property="Visibility" Value="Collapsed" />
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsEditMode, ElementName=__TabItemControl}" Value="True">
-                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Setter Property="Visibility" Value="Visible" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </Grid.Style>
-                    <Path Width="16"
-                          Height="13"
-                          Margin="6,0,0,0"
-                          HorizontalAlignment="Left"
-                          VerticalAlignment="Center"
-                          Data="M 1,6.5 L 5.5,11 L 15,1"
-                          Stroke="#FFD4D4D4"
-                          StrokeThickness="2"
-                          StrokeStartLineCap="Square"
-                          StrokeEndLineCap="Square"
-                          StrokeLineJoin="Miter"
-                          Stretch="Fill">
+                    <Path>
                         <Path.Style>
-                            <Style TargetType="Path">
-                                <Setter Property="Visibility" Value="Collapsed"/>
+                            <!-- Внешний вид приходит из общего словаря, а условия показа остаются рядом с контекстом TabItemControl. -->
+                            <Style TargetType="Path" BasedOn="{StaticResource Icons/TabSelectionCheckmarkStyle}">
+                                <Setter Property="Visibility" Value="Collapsed" />
                                 <Style.Triggers>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsSelected, ElementName=__TabItemControl}" Value="True"/>
-                                            <Condition Binding="{Binding IsMultipleSelection, ElementName=__TabItemControl}" Value="True"/>
+                                            <Condition Binding="{Binding IsSelected, ElementName=__TabItemControl}" Value="True" />
+                                            <Condition Binding="{Binding IsMultipleSelection, ElementName=__TabItemControl}" Value="True" />
                                         </MultiDataTrigger.Conditions>
-                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Setter Property="Visibility" Value="Visible" />
                                     </MultiDataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -177,14 +195,53 @@
                     </Path>
                 </Grid>
 
-                <TextBlock Grid.Column="1"
-                           Margin="5,0,5,0"
-                           FontSize="{StaticResource AppTabItemFontSize}"
-                           VerticalAlignment="Center"
-                           HorizontalAlignment="Left"
-                           TextTrimming="CharacterEllipsis"
-                           Text="{Binding Title, ElementName=__TabItemControl}" 
-                           />
+                <Grid Grid.Column="1" Margin="5,0,5,0">
+                    <TextBlock FontSize="{StaticResource AppTabItemFontSize}"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Left"
+                               TextTrimming="CharacterEllipsis"
+                               Text="{Binding Title, ElementName=__TabItemControl}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRenaming, ElementName=__TabItemControl}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBox x:Name="RenameTextBox"
+                             MinWidth="80"
+                             Margin="0,1"
+                             Padding="3,0"
+                             FontSize="{StaticResource AppTabItemFontSize}"
+                             VerticalContentAlignment="Center"
+                             Text="{Binding RenameText, ElementName=__TabItemControl, UpdateSourceTrigger=PropertyChanged}"
+                             KeyDown="RenameTextBox_OnKeyDown"
+                             LostKeyboardFocus="RenameTextBox_OnLostKeyboardFocus">
+                        <TextBox.Style>
+                            <Style TargetType="TextBox">
+                                <!-- Нейтральное inline-поле в стиле тёмной темы VS: оно остаётся частью
+                                     строки вкладки и не выглядит ярким системным TextBox. -->
+                                <Setter Property="Background" Value="#FF252526" />
+                                <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+                                <Setter Property="CaretBrush" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+                                <Setter Property="BorderBrush" Value="#FF6B6B6B" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="SelectionBrush" Value="#FF0078D7" />
+                                <Setter Property="SnapsToDevicePixels" Value="True" />
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRenaming, ElementName=__TabItemControl}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBox.Style>
+                    </TextBox>
+                </Grid>
                 <Grid Style="{StaticResource ControlPanelStyle}"
                       Grid.Column="2"
                       HorizontalAlignment="Right"

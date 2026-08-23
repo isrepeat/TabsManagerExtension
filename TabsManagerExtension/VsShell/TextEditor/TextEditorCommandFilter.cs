@@ -59,10 +59,19 @@ namespace TabsManagerExtension.VsShell.TextEditor {
             if (cmdGroup == VSConstants.VSStd2K && Enum.IsDefined(typeof(VSConstants.VSStd2KCmdID), (int)cmdId)) {
                 var std2kCmd = (VSConstants.VSStd2KCmdID)cmdId;
                 if (std2kCmd == VSConstants.VSStd2KCmdID.TYPECHAR) {
-                    return this.IsSpaceCommandEnabled && IsSpaceInput(inputArgument);
+                    return this.IsSpaceCommandEnabled &&
+                           IsSpaceInput(inputArgument) &&
+                           this.CanInterceptNavigationKey?.Invoke(Key.Space) != false;
                 }
 
-                return _trackedStd2kCommands.Contains(std2kCmd);
+                if (!_trackedStd2kCommands.Contains(std2kCmd)) {
+                    return false;
+                }
+
+                // Enter, Escape, Delete и стрелки тоже могут принадлежать дочернему TextBox.
+                // Перед OLE-перехватом проверяем фактическую доступность каждой mapped-клавиши.
+                var mappedKey = VsShell.VsCommandMapper.TryMapStd2kToKey(std2kCmd);
+                return !mappedKey.HasValue || this.CanInterceptNavigationKey?.Invoke(mappedKey.Value) != false;
             }
 
             if (cmdGroup == VSConstants.GUID_VSStandardCommandSet97 && Enum.IsDefined(typeof(VSConstants.VSStd97CmdID), (int)cmdId)) {
@@ -74,16 +83,26 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                     return false;
                 }
 
-                // Возвращая false, передаём исходную OLE-команду следующему command target.
-                // Это критично для Undo: при фокусе редактора его должен выполнить сам редактор.
-                if (std97Cmd == VSConstants.VSStd97CmdID.SelectAll && this.CanInterceptNavigationKey?.Invoke(Key.A) == false) {
+                if (!_trackedStd97Commands.Contains(std97Cmd)) {
                     return false;
                 }
-                if (std97Cmd == VSConstants.VSStd97CmdID.Undo && this.CanInterceptNavigationKey?.Invoke(Key.Z) == false) {
+
+                Key? mappedKey = std97Cmd switch {
+                    VSConstants.VSStd97CmdID.Cancel => Key.Escape,
+                    VSConstants.VSStd97CmdID.Escape => Key.Escape,
+                    VSConstants.VSStd97CmdID.SelectAll => Key.A,
+                    VSConstants.VSStd97CmdID.Undo => Key.Z,
+                    _ when VsShell.VsCommandMapper.TryMapStd97ToStd2kCommand(std97Cmd, out var std2kCmd) =>
+                        VsShell.VsCommandMapper.TryMapStd2kToKey(std2kCmd),
+                    _ => null
+                };
+
+                // Возвращая false, передаём исходную OLE-команду реальному WPF/VS target.
+                if (mappedKey.HasValue && this.CanInterceptNavigationKey?.Invoke(mappedKey.Value) == false) {
                     return false;
                 }
-                //return _trackedStd97Commands.Contains(std97Cmd) || _trackedMappedStd97FromStd2kCommands.Contains(std97Cmd);
-                return _trackedStd97Commands.Contains(std97Cmd);
+
+                return true;
             }
 
             return false;
@@ -124,6 +143,9 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                     }
                     if (std97Cmd == VSConstants.VSStd97CmdID.Undo) {
                         return Key.Z;
+                    }
+                    if (std97Cmd == VSConstants.VSStd97CmdID.Cancel || std97Cmd == VSConstants.VSStd97CmdID.Escape) {
+                        return Key.Escape;
                     }
                     if (VsShell.VsCommandMapper.TryMapStd97ToStd2kCommand(std97Cmd, out var std2kCmd)) {
                         return VsShell.VsCommandMapper.TryMapStd2kToKey(std2kCmd);

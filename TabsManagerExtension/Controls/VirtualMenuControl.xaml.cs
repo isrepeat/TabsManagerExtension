@@ -69,6 +69,7 @@ namespace TabsManagerExtension.Controls {
 
         public object CurrentMenuDataContext { get; private set; }
         public object? CurrentChildMenuDataContext { get; private set; }
+        public bool IsMenuOpen => this.VirtualMenu.MenuPopup.IsOpen;
         public bool IsChildMenuOpen => this.ChildVirtualMenu.MenuPopup.IsOpen;
         
         private DispatcherTimer showTimer;

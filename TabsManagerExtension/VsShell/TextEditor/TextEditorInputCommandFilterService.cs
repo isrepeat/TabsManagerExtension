@@ -31,6 +31,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             VSConstants.VSStd2KCmdID.LEFT,
             VSConstants.VSStd2KCmdID.RIGHT,
             VSConstants.VSStd2KCmdID.RETURN,
+            VSConstants.VSStd2KCmdID.CANCEL,
             VSConstants.VSStd2KCmdID.DELETE,
             VSConstants.VSStd2KCmdID.BACKSPACE,
             // Space приходит как TYPECHAR, поэтому фильтру нужен исходный OLE-аргумент символа.
@@ -39,6 +40,8 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
 
         private static readonly VSConstants.VSStd97CmdID[] _trackedStd97Commands = new[] {
             VSConstants.VSStd97CmdID.Delete,
+            VSConstants.VSStd97CmdID.Cancel,
+            VSConstants.VSStd97CmdID.Escape,
             VSConstants.VSStd97CmdID.SelectAll,
             VSConstants.VSStd97CmdID.Undo,
         };
@@ -226,7 +229,20 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             if (_currentFilter != null) {
                 var key = _currentFilter.TryResolveKey(cmdGroup, cmdId, inputArgument);
                 if (key.HasValue) {
-                    this.RedirectKeyInput(inputTarget, key.Value);
+                    if (key == Key.A || key == Key.Z) {
+                        Helpers.Diagnostic.Logger.LogDebug($"[NavigationInput] OLE command resolved as {key.Value}; forced={_forcedInputTarget != null}, panelFocused={inputTarget.IsKeyboardFocusWithin}.");
+                    }
+
+                    // Forced target хранит панель для navigation mode, но её дочерний TextBox
+                    // может иметь настоящий WPF-фокус во время rename. В таком случае посылаем
+                    // событие прямо полю, иначе Enter/стрелки попадут в корень панели.
+                    var routedInputTarget = _forcedInputTarget != null &&
+                                            inputTarget.IsKeyboardFocusWithin &&
+                                            Keyboard.FocusedElement is FrameworkElement focusedElement
+                        ? focusedElement
+                        : inputTarget;
+
+                    this.RedirectKeyInput(routedInputTarget, key.Value);
                 }
             }
         }
@@ -313,7 +329,9 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
                 key);
             inputEvent.RoutedEvent = Keyboard.KeyDownEvent;
 
-            InputManager.Current.ProcessInput(inputEvent);
+            // RaiseEvent фиксирует routed target явно. Через InputManager синтетическая команда
+            // могла повторно выбрать editor view, несмотря на WPF-фокус inline TextBox.
+            target.RaiseEvent(inputEvent);
         }
     }
 }

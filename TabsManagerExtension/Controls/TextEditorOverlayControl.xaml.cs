@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Text;
+using Microsoft.VisualStudio.Text.Editor;
 using TabsManagerExtension.State.TextEditor;
 
 
@@ -46,9 +47,11 @@ namespace TabsManagerExtension.Controls {
 
         private State.TextEditor.AnchorPoint? _selectedAnchor;
         private ITextSnapshot? _activeSnapshot;
+        private IWpfTextView? _activeTextView;
         private ITextBuffer? _loadedTextBuffer;
         private int _loadedSnapshotVersion = -1;
         private bool _isAnchorListExpanded;
+        private bool _isSynchronizingCaretSelection;
         private readonly Dictionary<ITextBuffer, AnchorSnapshotCache> _anchorCache = new();
 
         private sealed class AnchorSnapshotCache {
@@ -72,7 +75,7 @@ namespace TabsManagerExtension.Controls {
                 if (_selectedAnchor != value) {
                     _selectedAnchor = value;
                     this.OnPropertyChanged();
-                    if (value != null) {
+                    if (value != null && !_isSynchronizingCaretSelection) {
                         this.NavigateToLine(value.LineNumber);
                     }
                 }
@@ -101,7 +104,8 @@ namespace TabsManagerExtension.Controls {
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
             //VsShell.TextEditor.Services.TextEditorCommandFilterService.Instance.RemoveTrackedInputElement(this);
-            this.Anchors.Clear();
+            // Контрол временно выгружается при переносе adorner между document frame.
+            // Не очищаем состояние и кэш: новый snapshot будет применён сразу после повторного подключения.
         }
 
 
@@ -110,6 +114,7 @@ namespace TabsManagerExtension.Controls {
 
             if (_isAnchorListExpanded) {
                 _isAnchorListExpanded = false;
+                this.UnsubscribeFromCaret();
                 this.IsAnchorListVisible.Value = false;
                 this.SelectedAnchor = null;
                 return;
@@ -118,6 +123,7 @@ namespace TabsManagerExtension.Controls {
             // Пока список закрыт, содержимое не пересчитывается при смене документа.
             // Загружаем anchors лениво только перед фактическим раскрытием.
             _isAnchorListExpanded = true;
+            this.SubscribeToCaret();
             if (_activeSnapshot != null) {
                 this.LoadAnchors(_activeSnapshot);
             }
@@ -127,8 +133,10 @@ namespace TabsManagerExtension.Controls {
         }
 
 
-        public void OnActiveTextViewChanged(ITextSnapshot snapshot) {
+        public void OnActiveTextViewChanged(IWpfTextView textView) {
             ThreadHelper.ThrowIfNotOnUIThread();
+            this.SetActiveTextView(textView);
+            var snapshot = textView.TextSnapshot;
             _activeSnapshot = snapshot;
 
             if (!_isAnchorListExpanded) {
@@ -139,6 +147,21 @@ namespace TabsManagerExtension.Controls {
             }
 
             this.LoadAnchors(snapshot);
+        }
+
+        public void ResetClosedDocumentState() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Открытость списка относится к текущему экземпляру вкладки и не должна
+            // переживать закрытие файла с последующим повторным открытием.
+            if (_activeSnapshot != null) {
+                _anchorCache.Remove(_activeSnapshot.TextBuffer);
+            }
+
+            _isAnchorListExpanded = false;
+            this.UnsubscribeFromCaret();
+            _activeTextView = null;
+            this.ResetLoadedAnchors(showToggleButton: false);
         }
 
         public void LoadAnchorsFromActiveDocument() {
@@ -153,16 +176,15 @@ namespace TabsManagerExtension.Controls {
             }
 
             _activeSnapshot = snapshot;
+            if (viewHost != null) {
+                this.SetActiveTextView(viewHost.TextView);
+            }
+
             this.LoadAnchors(snapshot);
         }
 
         private void LoadAnchors(ITextSnapshot snapshot) {
             ThreadHelper.ThrowIfNotOnUIThread();
-
-            // При возврате из Output активируется тот же snapshot — повторный разбор в этом случае не нужен.
-            if (ReferenceEquals(_loadedTextBuffer, snapshot.TextBuffer) && _loadedSnapshotVersion == snapshot.Version.VersionNumber) {
-                return;
-            }
 
             _loadedTextBuffer = snapshot.TextBuffer;
             _loadedSnapshotVersion = snapshot.Version.VersionNumber;
@@ -204,6 +226,59 @@ namespace TabsManagerExtension.Controls {
             this.IsAnchorListVisible.Value = _isAnchorListExpanded && hasAnchors;
             if (!this.IsAnchorListVisible.Value) {
                 this.SelectedAnchor = null;
+                return;
+            }
+
+            this.UpdateSelectionFromCaret();
+        }
+
+        private void SetActiveTextView(IWpfTextView textView) {
+            if (ReferenceEquals(_activeTextView, textView)) {
+                return;
+            }
+
+            this.UnsubscribeFromCaret();
+            _activeTextView = textView;
+            this.SubscribeToCaret();
+        }
+
+        private void SubscribeToCaret() {
+            if (!_isAnchorListExpanded || _activeTextView == null) {
+                return;
+            }
+
+            _activeTextView.Caret.PositionChanged -= this.OnCaretPositionChanged;
+            _activeTextView.Caret.PositionChanged += this.OnCaretPositionChanged;
+        }
+
+        private void UnsubscribeFromCaret() {
+            if (_activeTextView != null) {
+                _activeTextView.Caret.PositionChanged -= this.OnCaretPositionChanged;
+            }
+        }
+
+        private void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e) {
+            if (_isAnchorListExpanded) {
+                this.UpdateSelectionFromCaret();
+            }
+        }
+
+        private void UpdateSelectionFromCaret() {
+            if (!_isAnchorListExpanded || _activeTextView == null || this.Anchors.Count == 0) {
+                return;
+            }
+
+            int caretLineNumber = _activeTextView.Caret.Position.BufferPosition.GetContainingLine().LineNumber + 1;
+            var matchingAnchor = this.Anchors
+                .Where(anchor => anchor.AnchorKind != Enums.AnchorKind.Separator && anchor.LineNumber <= caretLineNumber)
+                .LastOrDefault();
+
+            _isSynchronizingCaretSelection = true;
+            try {
+                this.SelectedAnchor = matchingAnchor;
+            }
+            finally {
+                _isSynchronizingCaretSelection = false;
             }
         }
 

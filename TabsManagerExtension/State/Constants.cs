@@ -6,6 +6,8 @@ namespace TabsManagerExtension.State {
             public const string CloseTab = "Close";
             public const string OpenTabLocation = "Open location";
             public const string CloseSelectedTabs = "Close selected tabs";
+            public const string CopyTabName = "Copy name";
+            public const string CopyTabPath = "Copy path";
         }
     }
 }

@@ -47,6 +47,7 @@ namespace TabsManagerExtension.VsShell {
                 VSConstants.VSStd2KCmdID.LEFT => Key.Left,
                 VSConstants.VSStd2KCmdID.RIGHT => Key.Right,
                 VSConstants.VSStd2KCmdID.RETURN => Key.Enter,
+                VSConstants.VSStd2KCmdID.CANCEL => Key.Escape,
                 VSConstants.VSStd2KCmdID.DELETE => Key.Delete,
                 VSConstants.VSStd2KCmdID.BACKSPACE => Key.Back,
                 _ => null

@@ -24,6 +24,7 @@ using Microsoft.VisualStudio.TextManager.Interop;
 using Helpers.Ex;
 using TabsManagerExtension.State.Document;
 
+// TODO: Вынеси UndoRedo логику табов в отдельный класс
 
 namespace TabsManagerExtension.Controls {
     public partial class TabsManagerToolWindowControl : Helpers.BaseUserControl {
@@ -176,6 +177,13 @@ namespace TabsManagerExtension.Controls {
         // управляют selection, не перемещая фиолетовую рамку активного VS-фрейма.
         private const Navigation.TabSelectionActivationPolicy TabSelectionActivationPolicy =
             Navigation.TabSelectionActivationPolicy.ActivateOnlyOnUnmodifiedPointerSelection;
+        private static readonly HashSet<string> RenamableTabExtensions = new(StringComparer.OrdinalIgnoreCase) {
+            ".c",
+            ".cpp",
+            ".h",
+            ".cxx",
+            ".hxx"
+        };
 
         public ICommand OnPinTabItemCommand { get; }
         public ICommand OnUnpinTabItemCommand { get; }
@@ -215,6 +223,10 @@ namespace TabsManagerExtension.Controls {
             this.OnToolbarMenuShowCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuShow);
             this.OnToolbarMenuOpenCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuOpen);
             this.OnToolbarMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuClosed);
+
+            // Коллекция должна существовать до первого показа: в отличие от старой реализации,
+            // UpdateVirtualMenuItems обновляет её на месте, а не заменяет новым экземпляром.
+            this.VirtualMenuItems = new ObservableCollection<Helpers.IMenuItem>();
 
             base.DataContext = this;
         }
@@ -388,6 +400,15 @@ namespace TabsManagerExtension.Controls {
         private void OnPreviewKeyDown(object sender, KeyEventArgs e) {
             if (!this.IsTabEditMode) {
                 return;
+            }
+
+            // Пока открыт inline rename, клавиши принадлежат TextBox. В частности, корневой
+            // PreviewKeyDown не должен превратить Enter в активацию вкладки раньше поля ввода.
+            if (Keyboard.FocusedElement is DependencyObject focusedElement) {
+                var focusedTabControl = Helpers.VisualTree.FindParentByType<TabItemControl>(focusedElement);
+                if (focusedTabControl?.IsRenaming == true) {
+                    return;
+                }
             }
 
             // Корневой обработчик не зависит от существования визуального TabItemControl:
@@ -655,6 +676,10 @@ namespace TabsManagerExtension.Controls {
             // Log params:
             Helpers.Diagnostic.Logger.LogParam($"document.Name = {document?.Name}");
 
+            if (!string.IsNullOrEmpty(document?.FullName)) {
+                _textEditorOverlayController.OnDocumentClosing(document.FullName);
+            }
+
             var tabItemDocument = this.FindTabItem(document);
             if (tabItemDocument != null) {
                 // Если закрытие пришло не из CloseTabItems, оно было инициировано самой VS
@@ -699,6 +724,16 @@ namespace TabsManagerExtension.Controls {
             if (tabItem is TabItemWindow) {
                 this.UpdateWindowTabsInfo();
                 this.SaveOpenToolWindows();
+            }
+
+            // IVsWindowFrameActivate не гарантирован при восстановлении сессии и повторной
+            // активации того же frame. После DTE-события берём фактически активный editor view.
+            if (tabItem is TabItemDocument) {
+                VsixThreadHelper.RunOnUiThread(
+                    Dispatcher,
+                    this._textEditorOverlayController.Show,
+                    DispatcherPriority.Background
+                );
             }
 
         }
@@ -1153,6 +1188,28 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
+        private void OnCopyTabName(object parameter) {
+            if (parameter is TabItemBase tabItem) {
+                this.CopyTabTextToClipboard(tabItem.Caption, "name");
+            }
+        }
+
+        private void OnCopyTabPath(object parameter) {
+            if (parameter is TabItemBase tabItem) {
+                this.CopyTabTextToClipboard(tabItem.FullName, "path");
+            }
+        }
+
+        private void CopyTabTextToClipboard(string text, string valueKind) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try {
+                Clipboard.SetText(text ?? string.Empty);
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogError($"Failed to copy tab {valueKind} to clipboard: {ex}");
+            }
+        }
+
         private void OnOpenLocationTabItem(object parameter) {
             using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope("OnOpenTabLocation()");
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -1458,6 +1515,17 @@ namespace TabsManagerExtension.Controls {
 
                                 this.ContextMenuItems = new ObservableCollection<Helpers.IMenuItem> {
                                     new Helpers.MenuItemCommand {
+                                        Header = State.Constants.UI.CopyTabName,
+                                        Command = new Helpers.RelayCommand<object>(this.OnCopyTabName),
+                                        CommandParameterContext = contextMenuOpeningArgs.DataContext,
+                                    },
+                                    new Helpers.MenuItemCommand {
+                                        Header = State.Constants.UI.CopyTabPath,
+                                        Command = new Helpers.RelayCommand<object>(this.OnCopyTabPath),
+                                        CommandParameterContext = contextMenuOpeningArgs.DataContext,
+                                    },
+                                    new Helpers.MenuItemSeparator(),
+                                    new Helpers.MenuItemCommand {
                                         Header = State.Constants.UI.OpenTabLocation,
                                         Command = new Helpers.RelayCommand<object>(this.OnOpenLocationTabItem),
                                         CommandParameterContext = contextMenuOpeningArgs.DataContext,
@@ -1472,6 +1540,17 @@ namespace TabsManagerExtension.Controls {
                             }
                             else if (tabItem is TabItemWindow tabItemWindow) {
                                 this.ContextMenuItems = new ObservableCollection<Helpers.IMenuItem> {
+                                    new Helpers.MenuItemCommand {
+                                        Header = State.Constants.UI.CopyTabName,
+                                        Command = new Helpers.RelayCommand<object>(this.OnCopyTabName),
+                                        CommandParameterContext = contextMenuOpeningArgs.DataContext,
+                                    },
+                                    new Helpers.MenuItemCommand {
+                                        Header = State.Constants.UI.CopyTabPath,
+                                        Command = new Helpers.RelayCommand<object>(this.OnCopyTabPath),
+                                        CommandParameterContext = contextMenuOpeningArgs.DataContext,
+                                    },
+                                    new Helpers.MenuItemSeparator(),
                                     new Helpers.MenuItemCommand {
                                         Header = State.Constants.UI.CloseTab,
                                         Command = new Helpers.RelayCommand<object>(this.OnCloseTabItem),
@@ -1516,13 +1595,17 @@ namespace TabsManagerExtension.Controls {
         // 
         // ░ VirtualMenu
         //
-        private void InteractiveArea_MouseEnter(object sender, MouseEventArgs e) {
-            //using var __logFunctionScoped = Helpers.Diagnostic.Logger.LogFunctionScope($"InteractiveArea_MouseEnter()");
+        private void CloseButton_MouseEnter(object sender, MouseEventArgs e) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (sender is FrameworkElement interactiveArea) {
+            if (sender is Button closeButton) {
+                var tabItemControl = Helpers.VisualTree.FindParentByType<TabItemControl>(closeButton);
+                if (tabItemControl == null) {
+                    return;
+                }
+
                 // Находим родительский ListViewItem (где привязаны данные)
-                var listViewItem = Helpers.VisualTree.FindParentByType<ListViewItem>(interactiveArea);
+                var listViewItem = Helpers.VisualTree.FindParentByType<ListViewItem>(tabItemControl);
                 if (listViewItem == null) {
                     return;
                 }
@@ -1532,10 +1615,34 @@ namespace TabsManagerExtension.Controls {
                     if (this.VirtualMenuControl.CurrentMenuDataContext is TabItemDocument previousTabItemDocument) {
                         previousTabItemDocument.Metadata.SetFlag("IsVirtualMenuOpenned", false);
                     }
-                    var screenPoint = interactiveArea.ex_ToDpiAwareScreen(new Point(interactiveArea.ActualWidth + 20, -60));
+                    // Таймер запускается только над крестиком. После открытия меню остаётся
+                    // видимым при перемещении по вкладке и закрывается на MouseLeave всей строки.
+                    var screenPoint = tabItemControl.ex_ToDpiAwareScreen(new Point(tabItemControl.ActualWidth + 20, -60));
                     this.VirtualMenuControl.Show(screenPoint, tabItemDocument);
                 }
             }
+        }
+
+        private void InteractiveArea_MouseEnter(object sender, MouseEventArgs e) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Вся площадь вкладки переключает контекст только у уже открытого меню.
+            // Первичный показ по-прежнему запускается исключительно наведением на крестик.
+            if (!this.VirtualMenuControl.IsMenuOpen ||
+                sender is not TabItemControl tabItemControl ||
+                tabItemControl.DataContext is not TabItemDocument tabItemDocument ||
+                ReferenceEquals(this.VirtualMenuControl.CurrentMenuDataContext, tabItemDocument)) {
+                return;
+            }
+
+            if (this.VirtualMenuControl.CurrentMenuDataContext is TabItemDocument previousTabItemDocument) {
+                previousTabItemDocument.Metadata.SetFlag("IsVirtualMenuOpenned", false);
+            }
+
+            // Show обновляет уже открытый popup без задержки и отменяет таймер скрытия,
+            // запущенный MouseLeave предыдущей вкладки.
+            var screenPoint = tabItemControl.ex_ToDpiAwareScreen(new Point(tabItemControl.ActualWidth + 20, -60));
+            this.VirtualMenuControl.Show(screenPoint, tabItemDocument);
         }
 
         private void InteractiveArea_MouseLeave(object sender, MouseEventArgs e) {
@@ -1556,10 +1663,21 @@ namespace TabsManagerExtension.Controls {
                     if (tabItem is TabItemDocument tabItemDocument) {
                         tabItemDocument.Metadata.SetFlag("IsVirtualMenuOpenned", true);
 
-                        this.VirtualMenuItems = new ObservableCollection<Helpers.IMenuItem> {
+                        var newMenuItems = new List<Helpers.IMenuItem> {
                             new Helpers.MenuItemHeader {
                                 Header = tabItem.Caption,
                             },
+                            new Helpers.MenuItemCommand {
+                                Header = State.Constants.UI.CopyTabName,
+                                Command = new Helpers.RelayCommand<object>(this.OnCopyTabName),
+                                CommandParameterContext = virtualMenuOpeningArgs.DataContext,
+                            },
+                            new Helpers.MenuItemCommand {
+                                Header = State.Constants.UI.CopyTabPath,
+                                Command = new Helpers.RelayCommand<object>(this.OnCopyTabPath),
+                                CommandParameterContext = virtualMenuOpeningArgs.DataContext,
+                            },
+                            new Helpers.MenuItemSeparator(),
                             new Helpers.MenuItemCommand {
                                 Header = State.Constants.UI.OpenTabLocation,
                                 Command = new Helpers.RelayCommand<object>(this.OnOpenLocationTabItem),
@@ -1576,13 +1694,13 @@ namespace TabsManagerExtension.Controls {
                                 var groupContexts = this.BuildGroupContextEntries(selectedHeaders);
 
                                 if (groupContexts.Count > 0) {
-                                    this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
+                                    newMenuItems.Add(new Helpers.MenuItemSeparator());
 
                                     var commonContexts = groupContexts.Where(context => context.IsAvailableForAll).ToList();
                                     var differingContexts = groupContexts.Where(context => !context.IsAvailableForAll).ToList();
 
                                     foreach (var groupContext in commonContexts) {
-                                        this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                        newMenuItems.Add(new Helpers.MenuItemCommand {
                                             Header = groupContext.ProjectEntry.BaseViewModel.Name,
                                             Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
                                             CommandParameterContext = groupContext,
@@ -1590,11 +1708,11 @@ namespace TabsManagerExtension.Controls {
                                     }
 
                                     if (commonContexts.Count > 0 && differingContexts.Count > 0) {
-                                        this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
+                                        newMenuItems.Add(new Helpers.MenuItemSeparator());
                                     }
 
                                     foreach (var groupContext in differingContexts) {
-                                        this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                        newMenuItems.Add(new Helpers.MenuItemCommand {
                                             Header = groupContext.ProjectEntry.BaseViewModel.Name,
                                             Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
                                             CommandParameterContext = groupContext,
@@ -1603,26 +1721,28 @@ namespace TabsManagerExtension.Controls {
                                 }
                             }
                             else {
-                                tabItemDocument.DocumentProjectReferencesInfo.UpdateReferences();
+                                var documentReferences = tabItemDocument.DocumentProjectReferencesInfo.GetAvailableReferences();
 
-                                if (tabItemDocument.DocumentProjectReferencesInfo.References.Count > 0) {
-                                    this.VirtualMenuItems.Add(new Helpers.MenuItemSeparator());
+                                if (documentReferences.Count > 0) {
+                                    newMenuItems.Add(new Helpers.MenuItemSeparator());
 
-                                    foreach (var refEntry in tabItemDocument.DocumentProjectReferencesInfo.References) {
-                                        this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                    foreach (var refEntry in documentReferences) {
+                                        newMenuItems.Add(new Helpers.MenuItemCommand {
                                             Header = refEntry.ProjectEntry.BaseViewModel.Name,
                                             Command = new Helpers.RelayCommand<object>(this.OnMoveTabItemToRelatedProject),
                                             CommandParameterContext = refEntry,
                                         });
                                     }
 
-                                    this.VirtualMenuItems.Add(new Helpers.MenuItemCommand {
+                                    newMenuItems.Add(new Helpers.MenuItemCommand {
                                         Header = "Reload projects",
                                         Command = new Helpers.RelayCommand<object>(this.OnReloadDocumentReferencesProjects),
                                         CommandParameterContext = tabItemDocument.DocumentProjectReferencesInfo,
                                     });
                                 }
                             }
+
+                            this.UpdateVirtualMenuItems(newMenuItems);
                         }
                     }
                     else if (tabItem is TabItemWindow tabItemWindow) {
@@ -1630,6 +1750,53 @@ namespace TabsManagerExtension.Controls {
                     }
                 }
             }
+        }
+
+        private void UpdateVirtualMenuItems(IReadOnlyList<Helpers.IMenuItem> newItems) {
+            // Сохраняем существующие модели и визуальные контейнеры там, где структура меню
+            // совпадает. Обычно при переходе между вкладками меняются только Header и параметры.
+            int commonCount = Math.Min(this.VirtualMenuItems.Count, newItems.Count);
+            for (int index = 0; index < commonCount; index++) {
+                var currentItem = this.VirtualMenuItems[index];
+                var newItem = newItems[index];
+
+                if (currentItem is Helpers.MenuItemHeader currentHeader &&
+                    newItem is Helpers.MenuItemHeader newHeader) {
+                    currentHeader.Header = newHeader.Header;
+                    continue;
+                }
+
+                if (currentItem is Helpers.MenuItemSeparator && newItem is Helpers.MenuItemSeparator) {
+                    continue;
+                }
+
+                if (currentItem is Helpers.MenuItemCommand currentCommand &&
+                    newItem is Helpers.MenuItemCommand newCommand &&
+                    GetVirtualMenuItemKind(currentCommand) == GetVirtualMenuItemKind(newCommand)) {
+                    currentCommand.Header = newCommand.Header;
+                    currentCommand.CommandParameterContext = newCommand.CommandParameterContext;
+                    continue;
+                }
+
+                this.VirtualMenuItems[index] = newItem;
+            }
+
+            while (this.VirtualMenuItems.Count > newItems.Count) {
+                this.VirtualMenuItems.RemoveAt(this.VirtualMenuItems.Count - 1);
+            }
+
+            for (int index = commonCount; index < newItems.Count; index++) {
+                this.VirtualMenuItems.Add(newItems[index]);
+            }
+        }
+
+        private static Type GetVirtualMenuItemKind(Helpers.MenuItemCommand menuItem) {
+            return menuItem.CommandParameterContext switch {
+                DocumentProjectReferencesInfo.RefEntry => typeof(DocumentProjectReferencesInfo.RefEntry),
+                DocumentProjectReferencesInfo.GroupContextEntry => typeof(DocumentProjectReferencesInfo.GroupContextEntry),
+                DocumentProjectReferencesInfo => typeof(DocumentProjectReferencesInfo),
+                _ => typeof(TabItemBase)
+            };
         }
 
         private bool TryGetSelectedHeaderGroup(TabItemDocument anchorTabItem, out IReadOnlyList<TabItemDocument> selectedHeaders) {
@@ -2109,6 +2276,10 @@ namespace TabsManagerExtension.Controls {
                 _isRestoringClosedTabs = false;
             }
 
+            // Контекстный Idle может наступить уже после следующего быстрого Ctrl+A. Сразу
+            // возвращаем WPF-фокус панели, а отложенный запрос ниже страхует от поздних
+            // DocumentOpened/activation-событий восстановленных VS-фреймов.
+            this.FocusEditModeInputTarget();
             _keyboardTabNavigationExtension.RestoreInputTarget();
         }
 
@@ -2301,7 +2472,28 @@ namespace TabsManagerExtension.Controls {
             }
 
             bool isControlPressed = (modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+            if (key == Key.F2 && modifiers == ModifierKeys.None) {
+                var focusedControl = this.FindTabItemControl(_keyboardTabNavigationExtension.FocusedItem);
+                if (focusedControl != null) {
+                    focusedControl.BeginRename();
+                }
+                return true;
+            }
+
+            if (key == Key.Escape && modifiers == ModifierKeys.None) {
+                // Escape сворачивает мультивыбор к пунктирно сфокусированной вкладке. Так панель
+                // выходит из группового действия, но сохраняет понятную точку навигации.
+                var focusedItem = _keyboardTabNavigationExtension.FocusedItem;
+                if (focusedItem != null) {
+                    _tabItemsSelectionCoordinator.SetSelection(focusedItem, true, ModifierKeys.None);
+                    _keyboardTabNavigationExtension.RestoreInputTarget();
+                }
+
+                return true;
+            }
+
             if (isControlPressed && key == Key.A) {
+                Helpers.Diagnostic.Logger.LogDebug("[NavigationInput] Ctrl+A handled by tabs panel: selecting all tabs.");
                 // SelectAll использует coordinator, чтобы корректно обновить общий selection state
                 // и все визуальные состояния групп, а не только IsSelected отдельных моделей.
                 _tabNavigationController.SelectAll();
@@ -2334,6 +2526,7 @@ namespace TabsManagerExtension.Controls {
             }
 
             if (isControlPressed && key == Key.Z) {
+                Helpers.Diagnostic.Logger.LogDebug($"[NavigationInput] Ctrl+Z received by tabs panel. HistoryCount={_closedTabsHistory.Count}.");
                 // Пустая история не должна поглощать стандартный Undo редактора.
                 if (_closedTabsHistory.Count == 0) {
                     return false;
@@ -2346,11 +2539,108 @@ namespace TabsManagerExtension.Controls {
             return _tabNavigationController.HandleKey(key, modifiers);
         }
 
+        internal bool TryRenameTabItem(TabItemControl source, string proposedName) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            if (source.DataContext is not TabItemDocument tabItemDocument) {
+                this.ShowTabRenameMessage("Only document tabs can be renamed.");
+                return false;
+            }
+
+            string oldPath = tabItemDocument.FullName;
+            string oldExtension = Path.GetExtension(oldPath);
+            string newName = proposedName?.Trim() ?? string.Empty;
+            // F2 может завершиться без фактического редактирования. Проверяем это до ограничений
+            // расширения, чтобы Escape через потерю фокуса и обычный Enter не показывали ошибку.
+            if (string.Equals(Path.GetFileName(oldPath), newName, StringComparison.Ordinal)) {
+                return true;
+            }
+
+            if (!RenamableTabExtensions.Contains(oldExtension)) {
+                this.ShowTabRenameMessage($"Files with the '{oldExtension}' extension cannot be renamed from Tabs Manager.");
+                return false;
+            }
+            if (string.IsNullOrWhiteSpace(newName) ||
+                !string.Equals(newName, Path.GetFileName(newName), StringComparison.Ordinal) ||
+                newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) {
+
+                this.ShowTabRenameMessage("Enter a valid file name without a directory path.");
+                return false;
+            }
+
+            string newExtension = Path.GetExtension(newName);
+            if (!RenamableTabExtensions.Contains(newExtension)) {
+                this.ShowTabRenameMessage($"The target extension '{newExtension}' is not supported. Use .c, .cpp, .h, .cxx, or .hxx.");
+                return false;
+            }
+
+            string? directory = Path.GetDirectoryName(oldPath);
+            string newPath = directory == null ? newName : Path.Combine(directory, newName);
+            // На Windows case-only rename указывает на тот же файл и не является конфликтом.
+            if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase) && File.Exists(newPath)) {
+                this.ShowTabRenameMessage($"A file named '{newName}' already exists in this directory.");
+                return false;
+            }
+
+            EnvDTE.ProjectItem? projectItem;
+            try {
+                projectItem = tabItemDocument.ShellDocument.Document.ProjectItem;
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogError($"Failed to resolve ProjectItem for '{oldPath}': {ex}");
+                this.ShowTabRenameMessage("Visual Studio could not resolve the project item for this document.");
+                return false;
+            }
+
+            if (projectItem == null) {
+                this.ShowTabRenameMessage("This document is not represented by a project item and cannot be safely renamed.");
+                return false;
+            }
+
+            try {
+                // ProjectItem.Name использует штатную project-system рутину: она обновляет файл,
+                // открытый document moniker и ссылки проекта так же, как Solution Explorer.
+                projectItem.Name = newName;
+                tabItemDocument.Caption = tabItemDocument.ShellDocument.Document.Name;
+                tabItemDocument.FullName = tabItemDocument.ShellDocument.Document.FullName;
+                return true;
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogError($"Failed to rename tab '{oldPath}' to '{newName}': {ex}");
+                this.ShowTabRenameMessage($"Visual Studio could not rename '{Path.GetFileName(oldPath)}' to '{newName}'.\n\n{ex.Message}");
+                return false;
+            }
+        }
+
+        internal void RestoreTabNavigationInputTarget() {
+            if (this.IsTabEditMode) {
+                _keyboardTabNavigationExtension.RestoreInputTarget();
+            }
+        }
+
+        private void ShowTabRenameMessage(string message) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            VsShellUtilities.ShowMessageBox(
+                ServiceProvider.GlobalProvider,
+                message,
+                "Rename Tab",
+                OLEMSGICON.OLEMSGICON_WARNING,
+                OLEMSGBUTTON.OLEMSGBUTTON_OK,
+                OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST
+            );
+        }
+
         private bool CanHandleRedirectedNavigationKey(Key key) {
             // Visual Studio разрешает глобальные команды до WPF PreviewKeyDown. Поэтому OLE-фильтр
             // спрашивает контрол заранее, кому принадлежит команда: панели или редактору.
             if (!this.IsKeyboardFocusWithin) {
                 return false;
+            }
+
+            // При inline rename фильтр должен поглотить OLE-команду редактора. Сервис ввода
+            // перенаправит её в реально сфокусированный TextBox, не затрагивая editor view.
+            if (Keyboard.FocusedElement is DependencyObject focusedElement &&
+                Helpers.VisualTree.FindParentByType<TabItemControl>(focusedElement)?.IsRenaming == true) {
+                return true;
             }
 
             // Ctrl+Z принадлежит панели только при наличии реальной операции восстановления.

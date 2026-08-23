@@ -28,8 +28,12 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
         private readonly EnvDTE80.DTE2 _dte2;
 
         private Helpers.AdornerOverlayManager<Controls.TextEditorOverlayControl>? _overlayManager;
+        private Controls.TextEditorOverlayControl? _overlay;
+        private FrameworkElement? _overlayTarget;
         private ITextSnapshot? _activeSnapshot;
         private IVsTextView? _activeTextView;
+        private IWpfTextView? _activeWpfTextView;
+        private string? _activeDocumentFullName;
 
         /// <summary>
         /// Инициализирует контроллер, привязанный к текущему экземпляру Visual Studio (DTE).
@@ -64,12 +68,6 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
         public void ActivateEditorFrame(IVsTextView textView) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            // VS может несколько раз сообщить об активации одного frame. Повторный поиск
-            // WPF view и пересчёт overlay для него не нужны.
-            if (ReferenceEquals(_activeTextView, textView) && _overlayManager?.Overlay?.Visibility == Visibility.Visible) {
-                return;
-            }
-
             var viewHost = TextEditorControlHelper.TryGetViewHost(textView);
             if (viewHost == null) {
                 // Не показываем данные предыдущего документа, пока новый editor view ещё недоступен.
@@ -77,10 +75,49 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
                 return;
             }
 
+            var overlayTarget = this.TryFindOverlayTarget(viewHost.TextView.VisualElement);
+            if (overlayTarget == null) {
+                // Не оставляем overlay предыдущего документа поверх нового editor frame.
+                this.Hide();
+                return;
+            }
+
             _activeTextView = textView;
+            _activeWpfTextView = viewHost.TextView;
             _activeSnapshot = viewHost.TextView.TextSnapshot;
-            this.Show();
+            _activeDocumentFullName = _dte2.ActiveDocument?.FullName;
+            this.EnsureAttached(overlayTarget);
+            if (_overlay != null) {
+                _overlay.Visibility = Visibility.Visible;
+            }
+
             this.ApplyActiveSnapshot();
+        }
+
+        public void OnDocumentClosing(string documentFullName) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            bool isTrackedDocument = string.Equals(
+                _activeDocumentFullName,
+                documentFullName,
+                StringComparison.OrdinalIgnoreCase
+            );
+
+            bool isDteActiveDocument = string.Equals(
+                _dte2.ActiveDocument?.FullName,
+                documentFullName,
+                StringComparison.OrdinalIgnoreCase
+            );
+
+            if (!isTrackedDocument && !isDteActiveDocument) {
+                return;
+            }
+
+            _overlay?.ResetClosedDocumentState();
+            _activeSnapshot = null;
+            _activeTextView = null;
+            _activeWpfTextView = null;
+            _activeDocumentFullName = null;
         }
 
 
@@ -107,30 +144,48 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
         /// Создаёт визуальный оверлей, если он ещё не создан или был откреплён.
         /// </summary>
         private void EnsureCreated() {
-            if (_overlayManager != null && _overlayManager.IsAttached) {
-                return;
-            }
-
-            var overlayTargaet = this.TryFindOverlayTarget();
-            if (overlayTargaet == null) {
+            var viewHost = TextEditorControlHelper.TryGetActiveViewHost();
+            var overlayTarget = viewHost == null
+                ? null
+                : this.TryFindOverlayTarget(viewHost.TextView.VisualElement);
+            if (overlayTarget == null) {
                 // Редактор ещё не загружен — повторим позже
                 Helpers.Diagnostic.Logger.LogDebug("TextEditor not loaded yet, try later");
                 VsixThreadHelper.RunOnUiThread(Dispatcher.CurrentDispatcher, UpdateState, DispatcherPriority.ApplicationIdle);
                 return;
             }
-            
-            var overlay = new Controls.TextEditorOverlayControl();
+
+            // Show может прийти из DTE WindowActivated без события IVsWindowFrame.
+            // Поэтому snapshot активного view синхронизируем и в этом пути.
+            _activeSnapshot = viewHost.TextView.TextSnapshot;
+            _activeWpfTextView = viewHost.TextView;
+            _activeDocumentFullName = _dte2.ActiveDocument?.FullName;
+            this.EnsureAttached(overlayTarget);
+            this.ApplyActiveSnapshot();
+        }
+
+        private void EnsureAttached(FrameworkElement overlayTarget) {
+            if (_overlayManager?.IsAttached == true && ReferenceEquals(_overlayTarget, overlayTarget)) {
+                return;
+            }
+
+            // У разных document frame собственный PART_ContentPanel. Переносим один и тот же
+            // контрол, чтобы при переключении редакторов сохранить состояние и кэш якорей.
+            _overlayManager?.Remove();
+            _overlay ??= new Controls.TextEditorOverlayControl();
             _overlayManager = new Helpers.AdornerOverlayManager<Controls.TextEditorOverlayControl>(
-                overlayTargaet,
-                overlay
-                );
+                overlayTarget,
+                _overlay
+            );
+
+            _overlayTarget = overlayTarget;
 
             Helpers.Diagnostic.Logger.LogDebug("AdornerOverlayManager created");
         }
 
         private void ApplyActiveSnapshot() {
-            if (_activeSnapshot != null && _overlayManager?.Overlay != null) {
-                _overlayManager.Overlay.OnActiveTextViewChanged(_activeSnapshot);
+            if (_activeWpfTextView != null && _overlayManager?.Overlay != null) {
+                _overlayManager.Overlay.OnActiveTextViewChanged(_activeWpfTextView);
             }
         }
 
@@ -144,8 +199,12 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
 
             _overlayManager.Remove();
             _overlayManager = null;
+            _overlay = null;
+            _overlayTarget = null;
             _activeTextView = null;
+            _activeWpfTextView = null;
             _activeSnapshot = null;
+            _activeDocumentFullName = null;
 
             Helpers.Diagnostic.Logger.LogDebug("AdornerOverlayManager disposed");
         }
@@ -154,16 +213,10 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
         /// <summary>
         /// Ищет WpfTextViewHost и возвращает его родителя с именем PART_ContentPanel.
         /// </summary>
-        private FrameworkElement TryFindOverlayTarget() {
-            // NOTE: Элемент с именем "PART_ContentPanel" не уникален, поэтому сначала
-            //       ищем уникальный элемент текстового редаквтора - WpfTextViewHost, а затем его родителя.
-            var viewHost = Helpers.VisualTree.FindChildByType(Application.Current.MainWindow, "WpfTextViewHost");
-            if (viewHost == null) {
-                return null;
-            }
-
-            var panel = Helpers.VisualTree.FindParentByName(viewHost, "PART_ContentPanel");
-            return panel;
+        private FrameworkElement? TryFindOverlayTarget(FrameworkElement textViewVisualElement) {
+            // PART_ContentPanel не уникален, поэтому поднимаемся строго от visual element
+            // активного IWpfTextView, а не выбираем первый редактор в главном окне VS.
+            return Helpers.VisualTree.FindParentByName(textViewVisualElement, "PART_ContentPanel");
         }
     }
 }
