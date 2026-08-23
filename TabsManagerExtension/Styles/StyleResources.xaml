@@ -11,6 +11,7 @@
                     >
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="BrushResources.xaml" />
+        <ResourceDictionary Source="IconResources.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <Style x:Key="CustomListViewStyle" TargetType="ListView">
@@ -127,15 +128,8 @@
                                  HorizontalAlignment="Center"
                                  VerticalAlignment="Center">
                             <Path x:Name="_CascadeGlyph"
-                                  Width="16"
-                                  Height="16"
-                                  Data="M 2,3 L 3,3 M 5,3 L 14,3 M 2,8 L 3,8 M 5,8 L 14,8 M 2,13 L 3,13 M 5,13 L 14,13"
-                                  Stroke="{TemplateBinding Foreground}"
-                                  StrokeThickness="1.25"
-                                  StrokeStartLineCap="Round"
-                                  StrokeEndLineCap="Round"
-                                  StrokeLineJoin="Round"
-                                  Opacity="0.48" />
+                                  Style="{StaticResource Icons/CascadeMenuStyle}"
+                                  Stroke="{TemplateBinding Foreground}" />
                         </Viewbox>
                     </Border>
                     <ControlTemplate.Triggers>

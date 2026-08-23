@@ -7,12 +7,18 @@
                     xmlns:localConverters="clr-namespace:TabsManagerExtension.Converters"
                     >
     <SolidColorBrush x:Key="AppAccentBrush" Color="{Binding Color, Source={StaticResource {x:Static vsshell:VsBrushes.HighlightKey}}}" />
-    
+
     <SolidColorBrush x:Key="AppAccentNonActiveLowBrush" Color="#FF2e2e2e"/>
     <SolidColorBrush x:Key="AppAccentNonActiveMiddleBrush" Color="#FF555555"/>
     <SolidColorBrush x:Key="AppIsMouseOverBrush" Color="#663c3c3c"/>
     <SolidColorBrush x:Key="AppSelectedBrush" Color="#FF3c3c3c"/>
     <SolidColorBrush x:Key="AppSelectedNonActiveBrush" Color="#663c3c3c"/>
+
+    <!-- Базовые поверхности и рамка вкладки повторяют нейтральную палитру тёмной темы VS. -->
+    <SolidColorBrush x:Key="AppTabsPanelBackgroundBrush" Color="#FF252526"/>
+    <SolidColorBrush x:Key="AppTabActiveBackgroundBrush" Color="#FF2D2D30"/>
+    <SolidColorBrush x:Key="AppTabActiveBorderBrush" Color="#FF4B4B4B"/>
+    <SolidColorBrush x:Key="AppTabsPanelSeparatorBrush" Color="#FF3F3F46"/>
 
     <!-- TabItemsGroup -->
     <sys:Double x:Key="AppTabItemsGroupFontSize">12</sys:Double>
