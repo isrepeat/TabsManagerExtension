@@ -1,9 +1,10 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
-using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 
 
 namespace TabsManagerExtension.VsShell.Document {
@@ -25,6 +26,32 @@ namespace TabsManagerExtension.VsShell.Document {
             catch {
                 return "Без проекта";
             }
+        }
+
+
+        public void Close() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            string documentPath = this.Document.FullName;
+            if (VsShellUtilities.IsDocumentOpen(
+                ServiceProvider.GlobalProvider,
+                documentPath,
+                VSConstants.LOGVIEWID_Any,
+                out _,
+                out _,
+                out var windowFrame
+            ) && windowFrame != null) {
+                // Закрываем найденный по moniker фрейм, а не сохранённую DTE-обёртку документа.
+                // Это особенно важно для Miscellaneous Files, у которых нет стабильной project hierarchy.
+                ErrorHandler.ThrowOnFailure(windowFrame.CloseFrame((uint)__FRAMECLOSE.FRAMECLOSE_PromptSave));
+                return;
+            }
+
+            // Fallback сохраняет прежнее поведение для нестандартных редакторов, которые не публикуют IVsWindowFrame.
+            var currentDocument = PackageServices.Dte2.Documents
+                .Cast<EnvDTE.Document>()
+                .FirstOrDefault(document => string.Equals(document.FullName, documentPath, StringComparison.OrdinalIgnoreCase));
+            (currentDocument ?? this.Document).Close(EnvDTE.vsSaveChanges.vsSaveChangesPrompt);
         }
 
       

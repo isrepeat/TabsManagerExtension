@@ -76,12 +76,15 @@
     <DefineConstants>$(DefineConstants);VSSDK</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Configuration\TabsManagerConfiguration.cs" />
-    <Compile Include="Configuration\TabsManagerSettingDefinitions.cs" />
+    <Compile Include="Settings\TabsManagerSettings.cs" />
+    <Compile Include="Settings\TabsManagerSettingsDefinitions.cs" />
     <Compile Include="Behaviours\MouseEnterCommandBehavior.cs" />
-    <Compile Include="Configuration\TabsManagerConfigurationService.cs" />
+    <Compile Include="Settings\TabsManagerSettingsService.cs" />
     <Compile Include="Controls\MenuControl.xaml.cs">
       <DependentUpon>MenuControl.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Controls\TabsManagerSettingsControl.xaml.cs">
+      <DependentUpon>TabsManagerSettingsControl.xaml</DependentUpon>
     </Compile>
     <Compile Include="Controls\TestTabsControl.xaml.cs">
       <DependentUpon>TestTabsControl.xaml</DependentUpon>
@@ -171,9 +174,14 @@
     <Compile Include="TabsManagerExtensionPackage.cs" />
     <Compile Include="TabsManagerExtensibility.cs" />
     <Compile Include="ToolWindows\TabsManagerToolWindow.cs" />
+    <Compile Include="ToolWindows\TabsManagerSettingsToolWindow.cs" />
     <Compile Include="ToolWindows\TabsManagerToolWindowCommand.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Page Include="Controls\TabsManagerSettingsControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <None Include="source.extension.vsixmanifest">
       <SubType>Designer</SubType>
     </None>

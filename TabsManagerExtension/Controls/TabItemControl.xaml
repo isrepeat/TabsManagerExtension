@@ -19,9 +19,12 @@
 
             <Style x:Key="SelectableCheckBoxContainerStyle" TargetType="CheckBox">
                 <Setter Property="Focusable" Value="False"/>
-                <Setter Property="Background" Value="Transparent"/>
-                <Setter Property="Foreground" Value="#FF808080"/>
-                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Background" Value="{DynamicResource AppTabBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AppTabForegroundBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource AppTabBorderBrush}" />
+                <Setter Property="FontWeight" Value="{DynamicResource AppTabFontWeight}" />
+                <Setter Property="FontStyle" Value="{DynamicResource AppTabFontStyle}" />
+                <Setter Property="FontSize" Value="{DynamicResource AppTabItemFontSize}" />
                 <Setter Property="Height" Value="{DynamicResource AppTabItemHeight}" />
                 <Setter Property="Template">
                     <Setter.Value>
@@ -67,33 +70,36 @@
                 </Setter>
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
-                        <Setter Property="Foreground" Value="White"/>
+                        <Setter Property="Background" Value="{DynamicResource AppTabHoverBackgroundBrush}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource AppTabHoverBorderBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource AppTabHoverForegroundBrush}"/>
+                        <Setter Property="FontWeight" Value="{DynamicResource AppTabHoverFontWeight}"/>
+                        <Setter Property="FontStyle" Value="{DynamicResource AppTabHoverFontStyle}"/>
+                        <Setter Property="FontSize" Value="{DynamicResource AppTabHoverFontSize}"/>
                     </Trigger>
-
-                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                        <Setter Property="FontWeight" Value="Bold"/>
-                        <Setter Property="Foreground" Value="White"/>
-                    </DataTrigger>
 
                     <DataTrigger Binding="{Binding IsPinnedTab}" Value="True">
                         <Setter Property="Foreground" Value="White"/>
                     </DataTrigger>
 
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding IsSelected}" Value="True"/>
-                            <Condition Binding="{Binding IsMultipleSelection, ElementName=__TabItemControl}" Value="True"/>
-                        </MultiDataTrigger.Conditions>
-                        <!-- Элементы мультивыбора используют тот же фон, что и hover. -->
-                        <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
-                    </MultiDataTrigger>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource AppTabSelectedBackgroundBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource AppTabSelectedBorderBrush}" />
+                        <Setter Property="Foreground" Value="{DynamicResource AppTabSelectedForegroundBrush}" />
+                        <Setter Property="FontWeight" Value="{DynamicResource AppTabSelectedFontWeight}" />
+                        <Setter Property="FontStyle" Value="{DynamicResource AppTabSelectedFontStyle}" />
+                        <Setter Property="FontSize" Value="{DynamicResource AppTabSelectedFontSize}" />
+                    </DataTrigger>
 
                     <!-- Открытый VS-фрейм оформляется как стандартная вкладка: нейтральная
                          сплошная рамка и слегка приподнятый относительно панели фон. -->
                     <DataTrigger Binding="{Binding Metadata[IsFrameActive]}" Value="True">
-                        <Setter Property="Background" Value="{StaticResource AppTabActiveBackgroundBrush}" />
-                        <Setter Property="BorderBrush" Value="{StaticResource AppTabActiveBorderBrush}" />
+                        <Setter Property="Background" Value="{DynamicResource AppTabActiveBackgroundBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource AppTabActiveBorderBrush}" />
+                        <Setter Property="Foreground" Value="{DynamicResource AppTabActiveForegroundBrush}" />
+                        <Setter Property="FontWeight" Value="{DynamicResource AppTabActiveFontWeight}" />
+                        <Setter Property="FontStyle" Value="{DynamicResource AppTabActiveFontStyle}" />
+                        <Setter Property="FontSize" Value="{DynamicResource AppTabActiveFontSize}" />
                     </DataTrigger>
 
                     <!-- Для неактивной навигационной вкладки основную рамку скрывает пунктирный
@@ -196,7 +202,7 @@
                 </Grid>
 
                 <Grid Grid.Column="1" Margin="5,0,5,0">
-                    <TextBlock FontSize="{StaticResource AppTabItemFontSize}"
+                    <TextBlock
                                VerticalAlignment="Center"
                                HorizontalAlignment="Left"
                                TextTrimming="CharacterEllipsis"
@@ -216,7 +222,7 @@
                              MinWidth="80"
                              Margin="0,1"
                              Padding="3,0"
-                             FontSize="{StaticResource AppTabItemFontSize}"
+                             FontSize="{DynamicResource AppTabItemFontSize}"
                              VerticalContentAlignment="Center"
                              Text="{Binding RenameText, ElementName=__TabItemControl, UpdateSourceTrigger=PropertyChanged}"
                              KeyDown="RenameTextBox_OnKeyDown"

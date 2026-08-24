@@ -19,8 +19,8 @@ namespace TabsManagerExtension {
 
         protected override async Task OnInitializedAsync(VisualStudioExtensibility extensibility, CancellationToken cancellationToken) {
             await base.OnInitializedAsync(extensibility, cancellationToken);
-            Helpers.Diagnostic.Logger.LogDebug("[Extensibility] Инициализация настроек Tabs Manager.");
-            await Configuration.TabsManagerConfigurationService.InitializeAsync(extensibility, cancellationToken);
+            Helpers.Diagnostic.Logger.LogDebug("[Extensibility] Initializing Tabs Manager settings.");
+            await Settings.TabsManagerSettingsService.InitializeAsync(extensibility, cancellationToken);
         }
     }
 }

@@ -56,15 +56,18 @@ namespace TabsManagerExtension.Controls {
 
         private sealed class AnchorSnapshotCache {
             public int Version { get; }
+            public int PatternsRevision { get; }
             public bool HasAnchors { get; }
             public IReadOnlyList<State.TextEditor.AnchorPoint>? ParsedAnchors { get; }
 
             public AnchorSnapshotCache(
                 int version,
+                int patternsRevision,
                 bool hasAnchors,
                 IReadOnlyList<State.TextEditor.AnchorPoint>? parsedAnchors
                 ) {
                 this.Version = version;
+                this.PatternsRevision = patternsRevision;
                 this.HasAnchors = hasAnchors;
                 this.ParsedAnchors = parsedAnchors;
             }
@@ -88,6 +91,7 @@ namespace TabsManagerExtension.Controls {
             this.InitializeComponent();
             this.Loaded += this.OnLoaded;
             this.Unloaded += this.OnUnloaded;
+            this.SizeChanged += this.OnOverlaySizeChanged;
             this.DataContext = this;
 
             this.OnToggleAnchorListCommand = new Helpers.RelayCommand<object>(this.OnToggleAnchorList);
@@ -99,13 +103,42 @@ namespace TabsManagerExtension.Controls {
             // IsHitTestVisible могут быть унаследованы от родителя (например, AdornerLayer),
             // поэтому значения из XAML не применяются гарантированно — устанавливаем явно в OnLoaded.
             this.IsHitTestVisible = true;
+            this.UpdateAnchorListMaxHeight();
+            Settings.TabsManagerSettingsService.AnchorPatternsChanged += this.OnAnchorPatternsChanged;
 
         }
 
+        private void OnOverlaySizeChanged(object sender, SizeChangedEventArgs e) {
+            this.UpdateAnchorListMaxHeight();
+        }
+
+        private void UpdateAnchorListMaxHeight() {
+            // Оставляем место для верхнего отступа, кнопки, промежутка и нижней границы редактора.
+            const double reservedHeight = 30 + 42 + 5 + 10;
+            this.AnchorListBox.MaxHeight = Math.Max(0, this.ActualHeight - reservedHeight);
+        }
+
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            Settings.TabsManagerSettingsService.AnchorPatternsChanged -= this.OnAnchorPatternsChanged;
             //VsShell.TextEditor.Services.TextEditorCommandFilterService.Instance.RemoveTrackedInputElement(this);
             // Контрол временно выгружается при переносе adorner между document frame.
             // Не очищаем состояние и кэш: новый snapshot будет применён сразу после повторного подключения.
+        }
+
+        private void OnAnchorPatternsChanged() {
+            this.Dispatcher.InvokeAsync(() => {
+                _anchorCache.Clear();
+                if (_activeSnapshot == null) {
+                    return;
+                }
+
+                if (_isAnchorListExpanded) {
+                    this.LoadAnchors(_activeSnapshot);
+                }
+                else {
+                    this.PrepareCollapsedState(_activeSnapshot);
+                }
+            });
         }
 
 
@@ -191,6 +224,7 @@ namespace TabsManagerExtension.Controls {
 
             if (_anchorCache.TryGetValue(snapshot.TextBuffer, out var cached) &&
                 cached.Version == snapshot.Version.VersionNumber &&
+                cached.PatternsRevision == Settings.TabsManagerSettingsService.AnchorPatternsRevision &&
                 cached.ParsedAnchors != null) {
 
                 this.ApplyAnchors(cached.ParsedAnchors);
@@ -200,11 +234,16 @@ namespace TabsManagerExtension.Controls {
             // Snapshot уже находится в памяти редактора, поэтому получение строк не выполняет COM-вызовов.
             var lines = snapshot.Lines.Select(line => line.GetText()).ToList();
 
-            var anchors = State.TextEditor.AnchorParser.ParseLinesWithContextWindow(lines);
+            var anchors = State.TextEditor.AnchorParser.ParseLinesWithContextWindow(
+                lines,
+                Settings.TabsManagerSettingsService.AnchorSectionPattern,
+                Settings.TabsManagerSettingsService.AnchorSubsectionPattern
+            );
             var final = State.TextEditor.AnchorParser.InsertSeparators(anchors);
 
             _anchorCache[snapshot.TextBuffer] = new AnchorSnapshotCache(
                 snapshot.Version.VersionNumber,
+                Settings.TabsManagerSettingsService.AnchorPatternsRevision,
                 final.Count > 0,
                 final
             );
@@ -289,13 +328,26 @@ namespace TabsManagerExtension.Controls {
             this.Anchors.Clear();
             this.IsAnchorListVisible.Value = false;
 
-            if (_anchorCache.TryGetValue(snapshot.TextBuffer, out var cached) && cached.Version == snapshot.Version.VersionNumber) {
+            if (_anchorCache.TryGetValue(snapshot.TextBuffer, out var cached) &&
+                cached.Version == snapshot.Version.VersionNumber &&
+                cached.PatternsRevision == Settings.TabsManagerSettingsService.AnchorPatternsRevision) {
+
                 this.IsAnchorToggleButtonVisible.Value = cached.HasAnchors;
                 return;
             }
 
-            bool hasAnchors = snapshot.Lines.Any(line => line.GetText().TrimStart().StartsWith("// ░"));
-            _anchorCache[snapshot.TextBuffer] = new AnchorSnapshotCache(snapshot.Version.VersionNumber, hasAnchors, null);
+            var lines = snapshot.Lines.Select(line => line.GetText()).ToList();
+            bool hasAnchors = State.TextEditor.AnchorParser.ContainsAnchor(
+                lines,
+                Settings.TabsManagerSettingsService.AnchorSectionPattern,
+                Settings.TabsManagerSettingsService.AnchorSubsectionPattern
+            );
+            _anchorCache[snapshot.TextBuffer] = new AnchorSnapshotCache(
+                snapshot.Version.VersionNumber,
+                Settings.TabsManagerSettingsService.AnchorPatternsRevision,
+                hasAnchors,
+                null
+            );
             this.IsAnchorToggleButtonVisible.Value = hasAnchors;
         }
 

@@ -91,7 +91,7 @@
 
 
             <Style x:Key="TabsSettingsPanelStyle" TargetType="ContentControl">
-                <Setter Property="Background" Value="{StaticResource AppTabsPanelBackgroundBrush}" />
+                <Setter Property="Background" Value="{DynamicResource AppTabsPanelBackgroundBrush}" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ContentControl">
@@ -352,23 +352,31 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Margin="6,0,0,0"
                            VerticalAlignment="Center"
                            FontSize="12"
                            FontWeight="SemiBold"
                            Text="Tabs" />
-                <ToggleButton Grid.Column="1"
+                <TextBlock x:Name="SelectionCountText"
+                           Grid.Column="1"
+                           Margin="6,0,8,0"
+                           VerticalAlignment="Center"
+                           Foreground="#FF999999"
+                           FontSize="11"
+                           Visibility="Collapsed" />
+                <ToggleButton Grid.Column="2"
                               Style="{StaticResource TabsEditModeToggleStyle}"
                               ToolTip="Toggle tab selection mode"
                               IsChecked="{Binding IsTabEditMode, Mode=TwoWay}" />
-                <Button Grid.Column="2"
+                <Button Grid.Column="3"
                         Style="{StaticResource TabsToolbarMenuButtonStyle}"
                         ToolTip="Tabs Manager settings"
                         Command="{Binding OnToolbarMenuShowCommand}"
                         CommandParameter="{Binding RelativeSource={RelativeSource Self}}" />
                 <localControls:MenuControl x:Name="ToolbarMenu"
-                                           Grid.ColumnSpan="3"
+                                           Grid.ColumnSpan="4"
                                            MenuItems="{Binding ToolbarMenuItems}"
                                            OpenCommand="{Binding OnToolbarMenuOpenCommand}"
                                            CloseCommand="{Binding OnToolbarMenuClosedCommand}" />

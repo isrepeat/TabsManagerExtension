@@ -19,15 +19,17 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Task = System.Threading.Tasks.Task;
 
-
 namespace TabsManagerExtension.ToolWindows {
     internal sealed class TabsManagerToolWindowCommand {
         public const int CommandId = 0x0100;
         public const int ToggleStandardTabsLayoutCommandId = 0x0101;
+        public const int OpenSettingsCommandId = 0x0102;
 
         public static readonly Guid CommandSet = new Guid("8a30806a-edfc-4c91-8182-025665145a07");
 
         private readonly AsyncPackage package;
+        private readonly OleMenuCommand toggleCustomTabsCommand;
+        private readonly OleMenuCommand toggleStandardLayoutCommand;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="TabsManagerToolWindowCommand"/> class.
@@ -40,10 +42,14 @@ namespace TabsManagerExtension.ToolWindows {
             commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
 
             var toggleCustomTabsCommandId = new CommandID(CommandSet, CommandId);
-            commandService.AddCommand(new OleMenuCommand(this.Execute, toggleCustomTabsCommandId));
+            this.toggleCustomTabsCommand = new OleMenuCommand(this.Execute, toggleCustomTabsCommandId);
+            this.toggleCustomTabsCommand.BeforeQueryStatus += (_, _) => {
+                this.toggleCustomTabsCommand.Visible = Settings.TabsManagerSettingsService.ShowTabsToggleToolbarButton;
+            };
+            commandService.AddCommand(this.toggleCustomTabsCommand);
 
             var toggleStandardLayoutCommandId = new CommandID(CommandSet, ToggleStandardTabsLayoutCommandId);
-            var toggleStandardLayoutCommand = new OleMenuCommand(
+            this.toggleStandardLayoutCommand = new OleMenuCommand(
                 this.ExecuteToggleStandardTabsLayout,
                 toggleStandardLayoutCommandId
             );
@@ -51,10 +57,16 @@ namespace TabsManagerExtension.ToolWindows {
             // При включённом Tabs Manager область вкладок всегда должна находиться слева.
             // Поэтому кнопку смены положения стандартных вкладок делаем доступной только тогда,
             // когда Tabs Manager выключен и на экране показаны обычные вкладки Visual Studio.
-            toggleStandardLayoutCommand.BeforeQueryStatus += (_, _) => {
-                toggleStandardLayoutCommand.Enabled = !VsixVisualTreeHelper.Instance.IsCustomTabsEnabled;
+            this.toggleStandardLayoutCommand.BeforeQueryStatus += (_, _) => {
+                this.toggleStandardLayoutCommand.Visible = Settings.TabsManagerSettingsService.ShowStandardTabsLayoutToolbarButton;
+                this.toggleStandardLayoutCommand.Enabled = !VsixVisualTreeHelper.Instance.IsCustomTabsEnabled;
             };
-            commandService.AddCommand(toggleStandardLayoutCommand);
+            commandService.AddCommand(this.toggleStandardLayoutCommand);
+
+            Settings.TabsManagerSettingsService.ToolbarButtonsVisibilityChanged += this.OnToolbarButtonsVisibilityChanged;
+
+            var openSettingsCommandId = new CommandID(CommandSet, OpenSettingsCommandId);
+            commandService.AddCommand(new OleMenuCommand(this.ExecuteOpenSettings, openSettingsCommandId));
         }
 
         public static TabsManagerToolWindowCommand Instance {
@@ -115,6 +127,21 @@ namespace TabsManagerExtension.ToolWindows {
                     ? "Tabs Manager: unable to change the standard tabs layout"
                     : $"Tabs Manager: standard tabs moved to {layout}"
             );
+        }
+
+        private async void ExecuteOpenSettings(object sender, EventArgs e) {
+            await TabsManagerExtensionPackage.ShowCustomSettingsAsync();
+        }
+
+        private void OnToolbarButtonsVisibilityChanged() {
+            ThreadHelper.JoinableTaskFactory.RunAsync(async () => {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(this.package.DisposalToken);
+                this.toggleCustomTabsCommand.Visible = Settings.TabsManagerSettingsService.ShowTabsToggleToolbarButton;
+                this.toggleStandardLayoutCommand.Visible = Settings.TabsManagerSettingsService.ShowStandardTabsLayoutToolbarButton;
+
+                var uiShell = await this.package.GetServiceAsync(typeof(SVsUIShell)) as IVsUIShell;
+                uiShell?.UpdateCommandUI(0);
+            }).FileAndForget("TabsManagerExtension/UpdateToolbarButtonsVisibility");
         }
 
 

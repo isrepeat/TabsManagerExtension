@@ -24,7 +24,6 @@ using Microsoft.VisualStudio.TextManager.Interop;
 using Microsoft.VisualStudio.VCProjectEngine;
 using Task = System.Threading.Tasks.Task;
 
-
 namespace TabsManagerExtension {
     public class VsixVisualTreeHelper : Helpers.ObservableObject {
         private const string DocumentTabsLayoutSetting = "environment.tabs.documentTabs.layout";
@@ -247,7 +246,7 @@ namespace TabsManagerExtension {
 
             ThreadHelper.ThrowIfNotOnUIThread();
             if (savePreference) {
-                Configuration.TabsManagerConfigurationService.SetAutoLoadCustomTabs(enable);
+                Settings.TabsManagerSettingsService.SetAutoLoadCustomTabs(enable);
             }
 
             if (enable) {

@@ -16,8 +16,18 @@
 
     <!-- Базовые поверхности и рамка вкладки повторяют нейтральную палитру тёмной темы VS. -->
     <SolidColorBrush x:Key="AppTabsPanelBackgroundBrush" Color="#FF252526"/>
+    <SolidColorBrush x:Key="AppTabBackgroundBrush" Color="#00FFFFFF"/>
+    <SolidColorBrush x:Key="AppTabBorderBrush" Color="#00FFFFFF"/>
+    <SolidColorBrush x:Key="AppTabHoverBackgroundBrush" Color="#663C3C3C"/>
+    <SolidColorBrush x:Key="AppTabHoverBorderBrush" Color="#00FFFFFF"/>
+    <SolidColorBrush x:Key="AppTabSelectedBackgroundBrush" Color="#663C3C3C"/>
+    <SolidColorBrush x:Key="AppTabSelectedBorderBrush" Color="#00FFFFFF"/>
     <SolidColorBrush x:Key="AppTabActiveBackgroundBrush" Color="#FF2D2D30"/>
     <SolidColorBrush x:Key="AppTabActiveBorderBrush" Color="#FF4B4B4B"/>
+    <SolidColorBrush x:Key="AppTabForegroundBrush" Color="#FF808080"/>
+    <SolidColorBrush x:Key="AppTabHoverForegroundBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="AppTabSelectedForegroundBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="AppTabActiveForegroundBrush" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="AppTabsPanelSeparatorBrush" Color="#FF3F3F46"/>
 
     <!-- TabItemsGroup -->
@@ -32,4 +42,15 @@
     <!-- Новые 100% соответствуют прежней высоте вкладок при масштабе 120%: 22 * 1.2 = 26.4. -->
     <sys:Double x:Key="AppTabItemHeight">26.4</sys:Double>
     <sys:Double x:Key="AppTabItemFontSize">12</sys:Double>
+    <FontWeight x:Key="AppTabFontWeight">Normal</FontWeight>
+    <FontStyle x:Key="AppTabFontStyle">Normal</FontStyle>
+    <sys:Double x:Key="AppTabHoverFontSize">12</sys:Double>
+    <FontWeight x:Key="AppTabHoverFontWeight">Normal</FontWeight>
+    <FontStyle x:Key="AppTabHoverFontStyle">Normal</FontStyle>
+    <sys:Double x:Key="AppTabSelectedFontSize">12</sys:Double>
+    <FontWeight x:Key="AppTabSelectedFontWeight">Bold</FontWeight>
+    <FontStyle x:Key="AppTabSelectedFontStyle">Normal</FontStyle>
+    <sys:Double x:Key="AppTabActiveFontSize">12</sys:Double>
+    <FontWeight x:Key="AppTabActiveFontWeight">Bold</FontWeight>
+    <FontStyle x:Key="AppTabActiveFontStyle">Normal</FontStyle>
 </ResourceDictionary>

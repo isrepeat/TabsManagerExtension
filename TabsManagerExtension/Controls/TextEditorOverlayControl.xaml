@@ -164,10 +164,13 @@
                             HorizontalAlignment="Right"
                             Margin="0,5,0,0"
                             >
-                        <ListBox Style="{StaticResource AnchorListBoxStyle}"
+                        <ListBox x:Name="AnchorListBox"
+                                 Style="{StaticResource AnchorListBoxStyle}"
                                  ItemContainerStyle="{StaticResource AnchorListBoxItemStyle}"
                                  ItemsSource="{Binding Anchors}"   
                                  SelectedItem="{Binding SelectedAnchor, Mode=TwoWay}"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                  >
                             <ListBox.ItemTemplate>
                                 <DataTemplate>

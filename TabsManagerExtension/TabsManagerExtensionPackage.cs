@@ -44,26 +44,57 @@ namespace TabsManagerExtension {
     [ProvideToolWindow(typeof(ToolWindows.EarlyPackageLoadHackToolWindow))]
 #endif
     [ProvideToolWindow(typeof(ToolWindows.TabsManagerToolWindow))]
+    [ProvideToolWindow(typeof(ToolWindows.TabsManagerSettingsToolWindow))]
     [Guid(TabsManagerExtensionPackage.PackageGuidString)]
     public sealed class TabsManagerExtensionPackage : AsyncPackage {
         public const string PackageGuidString = "7a0ce045-e2ba-4f14-8b80-55cfd666e3d8";
-        private const string OptionKey = "TabsManagerExtension";
+        private static TabsManagerExtensionPackage? _instance;
+
+        // Синхронная точка входа используется командами VS и передаёт работу в JTF без блокировки UI.
         internal static void ShowOptions() {
             ThreadHelper.ThrowIfNotOnUIThread();
-            PackageServices.Dte2.ExecuteCommand("Tools.Options");
+            ThreadHelper.JoinableTaskFactory.RunAsync(ShowCustomSettingsAsync).FileAndForget("TabsManagerExtension/ShowSettings");
+        }
+
+        internal static async Task ShowCustomSettingsAsync() {
+            // Страница реализована как MDI tool window: это даёт полный контроль над XAML и поведение вкладки документа.
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            Helpers.Diagnostic.Logger.LogDebug("[Settings] Opening Tabs Manager settings tab.");
+            var package = _instance ?? throw new InvalidOperationException("Tabs Manager package is not initialized.");
+            var window = await package.FindToolWindowAsync(
+                typeof(ToolWindows.TabsManagerSettingsToolWindow),
+                0,
+                true,
+                package.DisposalToken
+            );
+
+            if (window?.Frame is not IVsWindowFrame frame) {
+                throw new InvalidOperationException("Unable to create Tabs Manager settings window.");
+            }
+
+            frame.SetProperty(
+                (int)__VSFPROPID.VSFPROPID_FrameMode,
+                (int)VSFRAMEMODE.VSFM_MdiChild
+            );
+
+            // Show активирует существующий фрейм либо показывает только что созданный.
+            ErrorHandler.ThrowOnFailure(frame.Show());
+            Helpers.Diagnostic.Logger.LogDebug("[Settings] Tabs Manager settings tab opened.");
         }
 
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress) {
             // When initialized asynchronously, the current thread may be a background thread at this point.
             // Do any initialization that requires the UI thread after switching to the UI thread.
             await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            _instance = this;
             
             // TODO: adapt the CppFeatures nuget to net472 (WPF?)
             //var initFlags = CppFeatures.Cx.InitFlags.DefaultFlags | CppFeatures.Cx.InitFlags.CreateInPackageFolder;
             //CppFeatures.Cx.Logger.Init(AppConstants.LogFilename, initFlags);
 
             //Console.Beep(1000, 500); // 1000 Гц, 500 мс
-            Configuration.TabsManagerConfigurationService.SettingsInitialized += this.OnSettingsInitialized;
+            Settings.TabsManagerSettingsService.SettingsInitialized += this.OnSettingsInitialized;
+            Settings.TabsManagerSettingsService.AutoLoadCustomTabsChanged += this.OnAutoLoadCustomTabsChanged;
 
             Services.ExtensionServices.Initialize();
 
@@ -80,7 +111,7 @@ namespace TabsManagerExtension {
 #if ENABLE_EARLY_PACKAGE_LOAD_HACK
             ToolWindows.EarlyPackageLoadHackToolWindow.Initialize(this);
 #endif
-            if (Configuration.TabsManagerConfigurationService.IsSettingsInitialized) {
+            if (Settings.TabsManagerSettingsService.IsSettingsInitialized) {
                 this.ApplyCustomTabsSetting();
             }
 
@@ -91,6 +122,7 @@ namespace TabsManagerExtension {
 #if DEBUG
         // Fallback используется только экспериментальной DEBUG-средой и не влияет на VSIX Release.
         private const string DebugSolutionPath = @"C:\WORK\Projects\TabsManagerExtension - Copy\TabsManagerExtension.sln";
+        //private const string DebugSolutionPath = @"C:\WORK\Projects\Cpp\UtilityHelpersLib\UtilityHelpersLib.sln";
 
         private void ConfigureExperimentalStartup() {
             ThreadHelper.ThrowIfNotOnUIThread();
@@ -104,7 +136,7 @@ namespace TabsManagerExtension {
                 }
             }
             catch (Exception ex) {
-                Helpers.Diagnostic.Logger.LogDebug($"[Package] Не удалось настроить запуск Experimental Instance: {ex.Message}");
+                Helpers.Diagnostic.Logger.LogDebug($"[Package] Failed to configure Experimental Instance startup: {ex.Message}");
             }
         }
 
@@ -122,15 +154,15 @@ namespace TabsManagerExtension {
                     }
 
                     if (!System.IO.File.Exists(DebugSolutionPath)) {
-                        Helpers.Diagnostic.Logger.LogDebug($"[Package] Debug solution не найдена: '{DebugSolutionPath}'.");
+                        Helpers.Diagnostic.Logger.LogDebug($"[Package] Debug solution was not found: '{DebugSolutionPath}'.");
                         return;
                     }
 
-                    Helpers.Diagnostic.Logger.LogDebug($"[Package] Experimental Instance запущен без решения. Открываем '{DebugSolutionPath}'.");
+                    Helpers.Diagnostic.Logger.LogDebug($"[Package] Experimental Instance started without a solution. Opening '{DebugSolutionPath}'.");
                     PackageServices.Dte2.Solution.Open(DebugSolutionPath);
                 }
                 catch (Exception ex) {
-                    Helpers.Diagnostic.Logger.LogDebug($"[Package] Не удалось открыть Debug solution: {ex.Message}");
+                    Helpers.Diagnostic.Logger.LogDebug($"[Package] Failed to open the debug solution: {ex.Message}");
                 }
             }).FileAndForget("TabsManagerExtension/OpenDebugSolutionIfNoneLoaded");
         }
@@ -145,7 +177,9 @@ namespace TabsManagerExtension {
 
         protected override void Dispose(bool disposing) {
             if (disposing) {
-                Configuration.TabsManagerConfigurationService.SettingsInitialized -= this.OnSettingsInitialized;
+                Settings.TabsManagerSettingsService.SettingsInitialized -= this.OnSettingsInitialized;
+                Settings.TabsManagerSettingsService.AutoLoadCustomTabsChanged -= this.OnAutoLoadCustomTabsChanged;
+                Settings.TabsManagerSettingsService.Shutdown();
             }
 
             base.Dispose(disposing);
@@ -154,16 +188,27 @@ namespace TabsManagerExtension {
         private void EnableCustomTabsImmediately() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            if (!Settings.TabsManagerSettingsService.AutoLoadCustomTabs) {
+                return;
+            }
+
             if (!VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
-                Helpers.Diagnostic.Logger.LogDebug("[Package] Раннее встраивание вкладок с настройкой по умолчанию AutoLoadCustomTabs=True.");
+                Helpers.Diagnostic.Logger.LogDebug("[Package] Enabling custom tabs early according to local settings.json.");
                 VsixVisualTreeHelper.Instance.ToggleCustomTabs(true, savePreference: false);
             }
+        }
+
+        private void OnAutoLoadCustomTabsChanged(bool enabled) {
+            this.JoinableTaskFactory.RunAsync(async () => {
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(this.DisposalToken);
+                VsixVisualTreeHelper.Instance.ToggleCustomTabs(enabled, savePreference: false);
+            }).FileAndForget("TabsManagerExtension/ApplyTabsSwitch");
         }
 
         private void ApplyCustomTabsSetting() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            bool shouldEnable = Configuration.TabsManagerConfigurationService.AutoLoadCustomTabs;
+            bool shouldEnable = Settings.TabsManagerSettingsService.AutoLoadCustomTabs;
             if (shouldEnable) {
                 // Даже если логическое состояние уже включено, host мог отсутствовать
                 // на Start Window и появиться только после открытия решения.
@@ -172,7 +217,7 @@ namespace TabsManagerExtension {
             }
 
             if (VsixVisualTreeHelper.Instance.IsCustomTabsEnabled) {
-                Helpers.Diagnostic.Logger.LogDebug("[Package] Применяем AutoLoadCustomTabs=False.");
+                Helpers.Diagnostic.Logger.LogDebug("[Package] Applying AutoLoadCustomTabs=False.");
                 VsixVisualTreeHelper.Instance.ToggleCustomTabs(false, savePreference: false);
             }
         }

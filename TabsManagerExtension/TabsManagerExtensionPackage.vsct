@@ -26,6 +26,8 @@
       <Button guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100" type="Button">
         <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyCommandGroup" />
         <Icon guid="guidImages" id="bmpPic1" />
+        <!-- Видимость кнопки обновляется в рантайме из settings.json. -->
+        <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
           <ButtonText>Toggle Tabs Manager</ButtonText>
           <CommandName>ToggleTabsManager</CommandName>
@@ -34,10 +36,21 @@
       <Button guid="guidTabsManagerExtensionPackageCmdSet" id="ToggleStandardTabsLayoutCommandId" priority="0x0110" type="Button">
         <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyCommandGroup" />
         <Icon guid="guidImages" id="bmpPic2" />
+        <!-- Эта команда также может быть скрыта пользователем без перезапуска Visual Studio. -->
+        <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
           <ButtonText>Toggle Standard Tabs Position</ButtonText>
           <ToolTipText>Switch standard document tabs between top and left</ToolTipText>
           <CommandName>ToggleStandardTabsPosition</CommandName>
+        </Strings>
+      </Button>
+      <Button guid="guidTabsManagerExtensionPackageCmdSet" id="OpenSettingsCommandId" priority="0x0120" type="Button">
+        <!-- Команда открывает собственную MDI-вкладку настроек Tabs Manager. -->
+        <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyCommandGroup" />
+        <Strings>
+          <ButtonText>Tabs Manager Settings</ButtonText>
+          <ToolTipText>Open the Tabs Manager settings page</ToolTipText>
+          <CommandName>OpenTabsManagerSettings</CommandName>
         </Strings>
       </Button>
     </Buttons>
@@ -47,6 +60,7 @@
     </Bitmaps>
   </Commands>
 
+  <!-- В стандартную панель выносятся только переключатели; команда настроек остаётся в меню Tools. -->
   <CommandPlacements>
     <CommandPlacement guid="guidTabsManagerExtensionPackageCmdSet" id="TabsManagerToolWindowCommandId" priority="0x0100">
       <Parent guid="guidTabsManagerExtensionPackageCmdSet" id="MyToolbarGroup" />
@@ -64,6 +78,7 @@
     <GuidSymbol name="guidTabsManagerExtensionPackageCmdSet" value="{8a30806a-edfc-4c91-8182-025665145a07}">
       <IDSymbol name="TabsManagerToolWindowCommandId" value="0x0100" />
       <IDSymbol name="ToggleStandardTabsLayoutCommandId" value="0x0101" />
+      <IDSymbol name="OpenSettingsCommandId" value="0x0102" />
       <IDSymbol name="MyCommandGroup" value="0x1020" />
       <IDSymbol name="MyToolbarGroup" value="0x1030" />
       <IDSymbol name="MyToolbar" value="0x1040" />

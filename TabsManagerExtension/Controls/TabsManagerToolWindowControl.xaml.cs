@@ -24,7 +24,6 @@ using Microsoft.VisualStudio.TextManager.Interop;
 using Helpers.Ex;
 using TabsManagerExtension.State.Document;
 
-// TODO: Вынеси UndoRedo логику табов в отдельный класс
 
 namespace TabsManagerExtension.Controls {
     public partial class TabsManagerToolWindowControl : Helpers.BaseUserControl {
@@ -108,7 +107,7 @@ namespace TabsManagerExtension.Controls {
                     _scaleFactorTabsCompactness = value;
                     OnPropertyChanged();
                     this.ApplyScaleTabsCompactness();
-                    Configuration.TabsManagerConfigurationService.SetTabsScaleFactor(value);
+                    Settings.TabsManagerSettingsService.SetTabsScaleFactor(value);
                 }
             }
         }
@@ -153,6 +152,12 @@ namespace TabsManagerExtension.Controls {
         private EnvDTE.SolutionEvents _solutionEvents;
 
         private DispatcherTimer? _tabsManagerStateTimer;
+        // Во время восстановления решения VS несколько раз активирует документы. Пока загрузка не закончена,
+        // эти поля удерживают последний активный tool window и не дают документам окончательно заменить его.
+        private DispatcherTimer? _activeToolWindowRestoreTimer;
+        private IVsWindowFrame? _pendingActiveToolWindowFrame;
+        private string? _pendingActiveToolWindowId;
+        private bool _isEnforcingPendingToolWindow;
         private FileSystemWatcher _fileWatcher;
         private bool _isRestoringToolWindows;
         // Во время Ctrl+Z активация открываемых документов не должна учитывать физически
@@ -201,7 +206,7 @@ namespace TabsManagerExtension.Controls {
 
         public TabsManagerToolWindowControl() {
             this.InitializeComponent();
-            this.ScaleFactorTabsCompactness = Configuration.TabsManagerConfigurationService.TabsScaleFactor;
+            this.ScaleFactorTabsCompactness = Settings.TabsManagerSettingsService.TabsScaleFactor;
             this.Loaded += this.OnLoaded;
             this.Unloaded += this.OnUnloaded;
             this.PreviewMouseDown += this.OnPreviewMouseDown;
@@ -278,7 +283,8 @@ namespace TabsManagerExtension.Controls {
 
         private void OnLoaded(object sender, RoutedEventArgs e) {
             Services.ExtensionServices.BeginUsage();
-            Configuration.TabsManagerConfigurationService.TabsScaleFactorChanged += this.OnTabsScaleFactorChanged;
+            Settings.TabsManagerSettingsService.TabsScaleFactorChanged += this.OnTabsScaleFactorChanged;
+            Settings.TabsManagerSettingsService.AppearanceChanged += this.OnAppearanceChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
             this.UpdateEditModeInputRedirect();
             Services.ExtensionStatusService.Instance.FeatureReadinessChanged += this.OnFeatureReadinessChanged;
@@ -291,20 +297,26 @@ namespace TabsManagerExtension.Controls {
             this.InitializeVsShellTrackers();
             this.InitializeTabItemsSelectionCoordinator();
             this.InitializeBackgroundRoutine();
+            this.PrepareActiveToolWindowRestore();
             this.ApplyScaleTabsCompactness();
+            this.ApplyAppearance();
 
             var hierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
             hierarchyAnalyzer.InitialAnalysisCompleted.Add(this.OnInitialHierarchyAnalysisCompleted);
             hierarchyAnalyzer.InitialAnalysisCompleted.InvokeForLastHandlerIfTriggered();
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
-            Configuration.TabsManagerConfigurationService.TabsScaleFactorChanged -= this.OnTabsScaleFactorChanged;
+            Settings.TabsManagerSettingsService.TabsScaleFactorChanged -= this.OnTabsScaleFactorChanged;
+            Settings.TabsManagerSettingsService.AppearanceChanged -= this.OnAppearanceChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.SetForcedInputTarget(null);
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.RemoveTrackedInputElement(this);
+            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Remove(this.OnSolutionClosed);
             VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.InitialAnalysisCompleted.Remove(this.OnInitialHierarchyAnalysisCompleted);
             Services.ExtensionStatusService.Instance.FeatureReadinessChanged -= this.OnFeatureReadinessChanged;
             this.SaveOpenToolWindows();
+            this.CancelActiveToolWindowRestore();
             this.UninitializeTabItemsSelectionCoordinator();
             this.UninitializeVsShellTrackers();
             this.UninitializeFileWatcher();
@@ -318,6 +330,15 @@ namespace TabsManagerExtension.Controls {
             this.Dispatcher.InvokeAsync(() => this.ScaleFactorTabsCompactness = value);
         }
 
+        private void OnAppearanceChanged() {
+            if (this.Dispatcher.CheckAccess()) {
+                this.ApplyAppearance();
+                return;
+            }
+
+            this.Dispatcher.InvokeAsync(this.ApplyAppearance);
+        }
+
         private void OnInitialHierarchyAnalysisCompleted(string solutionName) {
             if (string.Equals(
                 _openDocumentsLoadedForSolution,
@@ -327,7 +348,12 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
+            _isSolutionClosing = false;
             _openDocumentsLoadedForSolution = solutionName;
+            if (_fileWatcher == null) {
+                this.InitializeFileWatcher();
+            }
+
             this.LoadOpenDocuments();
         }
 
@@ -707,6 +733,10 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
+            if (activatedShellWindow.Window.Document != null && this.KeepPendingToolWindowActive()) {
+                return;
+            }
+
             TabItemBase? tabItem;
             if (activatedShellWindow.Window.Document != null) {
                 // Для уже известного документа не создаём временный TabItemDocument и его
@@ -719,6 +749,9 @@ namespace TabsManagerExtension.Controls {
                 tabItem ??= this.AddTabItemToAutoDeterminedGroupIfMissing(new TabItemWindow(activatedShellWindow));
             }
 
+            // DTE WindowActivated приходит после фактического переключения frame и поэтому
+            // является окончательным источником как selection, так и marker активного frame.
+            this.SetActiveFrameTabItem(tabItem);
             this.SelectActivatedTabItem(tabItem);
 
             if (tabItem is TabItemWindow) {
@@ -734,6 +767,10 @@ namespace TabsManagerExtension.Controls {
                     this._textEditorOverlayController.Show,
                     DispatcherPriority.Background
                 );
+            }
+            else {
+                Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", false);
+                this._textEditorOverlayController.Hide();
             }
 
         }
@@ -761,13 +798,28 @@ namespace TabsManagerExtension.Controls {
             // Сохраняем снимок до того, как Visual Studio начнёт последовательно закрывать окна.
             // Иначе WindowClosing в конце завершения IDE перезапишет историю пустым списком.
             this.SaveOpenToolWindows();
+            this.CancelActiveToolWindowRestore();
             _isSolutionClosing = true;
+
+            // BeforeClosing вызывается до модального диалога сохранения. После Cancel решение
+            // остаётся открытым, поэтому снимаем временный флаг только после возврата UI в idle.
+            this.Dispatcher.BeginInvoke(new Action(() => {
+                if (PackageServices.Dte2.Solution.IsOpen) {
+                    Helpers.Diagnostic.Logger.LogDebug("Solution close was canceled; keeping Tabs Manager state.");
+                    _isSolutionClosing = false;
+                }
+            }), DispatcherPriority.ApplicationIdle);
+        }
+
+        private void OnSolutionClosed(string solutionName) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            Helpers.Diagnostic.Logger.LogDebug($"Solution closed; clearing Tabs Manager state for '{solutionName}'.");
             _closedTabsHistory.Clear();
             _tabsBeingClosed.Clear();
-
-            // TODO: try replace with this.Unload()
             this.SortedTabItemsGroups.Clear();
             this.UninitializeFileWatcher();
+            _openDocumentsLoadedForSolution = null;
         }
         
 
@@ -852,7 +904,15 @@ namespace TabsManagerExtension.Controls {
 
             // IsFrameActive — отдельное состояние от IsSelected: только оно управляет фиолетовой
             // рамкой и должно изменяться вслед за реально активированным VS-фреймом, а не мультивыбором.
-            var activeWindow = PackageServices.Dte2.ActiveWindow;
+            vsWindowFrame.GetProperty((int)__VSFPROPID.VSFPROPID_ExtWindowObject, out var activatedWindowObject);
+            // Во время первого Show() DTE.ActiveWindow ещё может указывать на предыдущий документ.
+            // Если новый frame пока не отдал ExtWindowObject, окончательную синхронизацию выполнит
+            // более поздний OnWindowActivated, а старую вкладку повторно активной не помечаем.
+            var activeWindow = activatedWindowObject as EnvDTE.Window;
+            if (activeWindow?.Document != null && this.KeepPendingToolWindowActive()) {
+                return;
+            }
+
             TabItemBase activeFrameTabItem = null;
             if (activeWindow?.Document != null) {
                 // Обычная документная вкладка сопоставляется по EnvDTE.Document.
@@ -866,6 +926,7 @@ namespace TabsManagerExtension.Controls {
             // Если окно не представлено в нашей панели, не назначаем рамку произвольной вкладке.
             if (activeFrameTabItem != null) {
                 this.SetActiveFrameTabItem(activeFrameTabItem);
+                this.SelectActivatedTabItem(activeFrameTabItem);
             }
 
 
@@ -954,10 +1015,19 @@ namespace TabsManagerExtension.Controls {
             if (tabItem.Metadata.GetFlag("IsActivatedExternally")) {
                 tabItem.Metadata.SetFlag("IsActivatedExternally", false);
             }
+
+            this.Dispatcher.InvokeAsync(this.UpdateSelectionCount, DispatcherPriority.DataBind);
         }
 
         private void OnSelectionStateChanged(Helpers.Enums.SelectionState selectionState) {
             this.IsMultipleTabSelection = selectionState == Helpers.Enums.SelectionState.Multiple;
+            this.UpdateSelectionCount();
+        }
+
+        private void UpdateSelectionCount() {
+            int selectedCount = _tabItemsSelectionCoordinator.SelectedItems.Count;
+            this.SelectionCountText.Text = $"{selectedCount} tabs";
+            this.SelectionCountText.Visibility = selectedCount > 1 ? Visibility.Visible : Visibility.Collapsed;
         }
 
 
@@ -1156,7 +1226,9 @@ namespace TabsManagerExtension.Controls {
                 try {
                     if (tabItem is TabItemDocument tabItemDocument) {
                         Helpers.Diagnostic.Logger.LogDebug($"close document \"{tabItemDocument.ShellDocument.Document.FullName}\"");
-                        tabItemDocument.ShellDocument.Document.Close();
+                        // ShellDocument повторно находит актуальный VS-фрейм по moniker. Сохранённый EnvDTE.Document
+                        // может быть устаревшим для вкладок из Miscellaneous Files и файлов без проекта.
+                        tabItemDocument.ShellDocument.Close();
                         // Документ будет удалён через OnDocumentClosing.
                     }
                     else if (tabItem is TabItemWindow tabItemWindow) {
@@ -1946,9 +2018,15 @@ namespace TabsManagerExtension.Controls {
             this.SyncActiveDocumentWithPrimaryTabItem();
 
             VsixThreadHelper.RunOnUiThread(Dispatcher, () => {
-                if (VsShell.TextEditor.TextEditorControlHelper.IsEditorActive()) {
+                var activeWindow = PackageServices.Dte2.ActiveWindow;
+                bool isDocumentFrameActive = activeWindow?.Document != null && VsShell.Document.ShellWindow.IsTabWindow(activeWindow);
+                if (isDocumentFrameActive && VsShell.TextEditor.TextEditorControlHelper.IsEditorActive()) {
                     Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", true);
                     _textEditorOverlayController.Show();
+                }
+                else {
+                    Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", false);
+                    _textEditorOverlayController.Hide();
                 }
             }, DispatcherPriority.Background);
         }
@@ -1963,25 +2041,155 @@ namespace TabsManagerExtension.Controls {
 
             _isRestoringToolWindows = true;
             try {
-                foreach (var windowId in Configuration.TabsManagerConfigurationService.OpenToolWindowIds) {
+                string? activeToolWindowId = Settings.TabsManagerSettingsService.ActiveToolWindowId;
+                IVsWindowFrame? activeToolWindowFrame = null;
+
+                // Сначала показываем сохранённые окна без активации, чтобы не создавать каскад смены фокуса.
+                foreach (var windowId in Settings.TabsManagerSettingsService.OpenToolWindowIds) {
                     if (!Guid.TryParse(windowId, out var persistenceGuid)) {
                         continue;
                     }
 
+                    bool isAlreadyVisible = PackageServices.Dte2.Windows
+                        .Cast<EnvDTE.Window>()
+                        .Any(window =>
+                            window.Visible &&
+                            window.Document == null &&
+                            VsShell.Document.ShellWindow.IsTabWindow(window) &&
+                            string.Equals(VsShell.Document.ShellWindow.GetWindowId(window), windowId, StringComparison.OrdinalIgnoreCase)
+                        );
+
                     try {
                         var result = uiShell.FindToolWindow((uint)__VSFINDTOOLWIN.FTW_fForceCreate, ref persistenceGuid, out var frame);
                         if (ErrorHandler.Succeeded(result)) {
-                            frame?.Show();
+                            if (string.Equals(windowId, activeToolWindowId, StringComparison.OrdinalIgnoreCase)) {
+                                activeToolWindowFrame = frame;
+                            }
+
+                            if (!isAlreadyVisible) {
+                                frame?.ShowNoActivate();
+                            }
                         }
                     }
                     catch (Exception ex) {
                         Helpers.Diagnostic.Logger.LogWarning($"Failed to restore tool window '{windowId}': {ex.Message}");
                     }
                 }
+
+                if (activeToolWindowFrame != null && !string.IsNullOrEmpty(activeToolWindowId)) {
+                    this.ScheduleActiveToolWindowRestore(activeToolWindowFrame, activeToolWindowId);
+                }
             }
             finally {
                 _isRestoringToolWindows = false;
             }
+        }
+
+        private void PrepareActiveToolWindowRestore() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Фрейм создаётся до восстановления документов, чтобы уже можно было защищать его от переключений VS.
+            string? activeToolWindowId = Settings.TabsManagerSettingsService.ActiveToolWindowId;
+            if (string.IsNullOrEmpty(activeToolWindowId) || !Guid.TryParse(activeToolWindowId, out var persistenceGuid)) {
+                return;
+            }
+
+            var uiShell = Package.GetGlobalService(typeof(SVsUIShell)) as IVsUIShell;
+            if (uiShell == null) {
+                return;
+            }
+
+            var result = uiShell.FindToolWindow((uint)__VSFINDTOOLWIN.FTW_fForceCreate, ref persistenceGuid, out var frame);
+            if (ErrorHandler.Succeeded(result) && frame != null) {
+                Helpers.Diagnostic.Logger.LogDebug($"Preparing active tool window frame before solution restore ({activeToolWindowId}).");
+                this.ScheduleActiveToolWindowRestore(frame, activeToolWindowId);
+            }
+        }
+
+        private void ScheduleActiveToolWindowRestore(IVsWindowFrame frame, string windowId) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            _pendingActiveToolWindowFrame = frame;
+            _pendingActiveToolWindowId = windowId;
+            if (_activeToolWindowRestoreTimer != null) {
+                return;
+            }
+
+            _activeToolWindowRestoreTimer = new DispatcherTimer(DispatcherPriority.ApplicationIdle, this.Dispatcher) {
+                Interval = TimeSpan.FromMilliseconds(250)
+            };
+            _activeToolWindowRestoreTimer.Tick += this.OnActiveToolWindowRestoreTimerTick;
+            _activeToolWindowRestoreTimer.Start();
+        }
+
+        private void OnActiveToolWindowRestoreTimerTick(object sender, EventArgs e) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Финальная активация допустима после открытия решения и завершения восстановления документов.
+            if (!PackageServices.Dte2.Solution.IsOpen) {
+                return;
+            }
+
+            var solution = PackageServices.TryGetVsSolution();
+            if (solution == null || !GetSolutionBooleanProperty(solution, (int)__VSPROPID4.VSPROPID_IsSolutionFullyLoaded)) {
+                return;
+            }
+
+            if (GetSolutionBooleanProperty(solution, (int)__VSPROPID2.VSPROPID_IsSolutionOpeningDocs)) {
+                return;
+            }
+
+            var frame = _pendingActiveToolWindowFrame;
+            string? windowId = _pendingActiveToolWindowId;
+            this.CancelActiveToolWindowRestore();
+            if (frame == null) {
+                return;
+            }
+
+            Helpers.Diagnostic.Logger.LogDebug($"Restoring active tool window frame after solution load ({windowId}).");
+            frame.Show();
+        }
+
+        private bool KeepPendingToolWindowActive() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var frame = _pendingActiveToolWindowFrame;
+            if (frame == null || _isEnforcingPendingToolWindow) {
+                return false;
+            }
+
+            // Повторный Show компенсирует промежуточную активацию документа со стороны VS.
+            try {
+                _isEnforcingPendingToolWindow = true;
+                Helpers.Diagnostic.Logger.LogDebug($"Ignoring document activation while restoring tool window ({_pendingActiveToolWindowId}).");
+                frame.Show();
+            }
+            finally {
+                _isEnforcingPendingToolWindow = false;
+            }
+
+            return true;
+        }
+
+        private void CancelActiveToolWindowRestore() {
+            if (_activeToolWindowRestoreTimer != null) {
+                _activeToolWindowRestoreTimer.Stop();
+                _activeToolWindowRestoreTimer.Tick -= this.OnActiveToolWindowRestoreTimerTick;
+                _activeToolWindowRestoreTimer = null;
+            }
+
+            _pendingActiveToolWindowFrame = null;
+            _pendingActiveToolWindowId = null;
+        }
+
+        private static bool GetSolutionBooleanProperty(IVsSolution solution, int propertyId) {
+            if (ErrorHandler.Failed(solution.GetProperty(propertyId, out var value))) {
+                return false;
+            }
+
+            return value is bool booleanValue
+                ? booleanValue
+                : value is int integerValue && integerValue != 0;
         }
 
         private void SaveOpenToolWindows() {
@@ -1991,14 +2199,23 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
+            // Сохраняем только реально видимые MDI tool windows, а не скрытые записи DTE.Windows.
             var windowIds = PackageServices.Dte2.Windows
                 .Cast<EnvDTE.Window>()
                 // DTE.Windows содержит также закрытые скрытые окна. Без проверки Visible
                 // они снова сохраняются и принудительно открываются при следующем запуске.
                 .Where(window => window.Visible && window.Document == null && VsShell.Document.ShellWindow.IsTabWindow(window))
-                .Select(VsShell.Document.ShellWindow.GetWindowId);
+                .Select(VsShell.Document.ShellWindow.GetWindowId)
+                .ToList();
 
-            Configuration.TabsManagerConfigurationService.SetOpenToolWindowIds(windowIds);
+            var activeWindow = PackageServices.Dte2.ActiveWindow;
+            string? activeToolWindowId = activeWindow != null &&
+                activeWindow.Document == null &&
+                VsShell.Document.ShellWindow.IsTabWindow(activeWindow)
+                    ? VsShell.Document.ShellWindow.GetWindowId(activeWindow)
+                    : null;
+
+            Settings.TabsManagerSettingsService.SetOpenToolWindowState(windowIds, activeToolWindowId);
         }
 
 
@@ -2456,6 +2673,7 @@ namespace TabsManagerExtension.Controls {
         internal void RegisterTabItemControl(TabItemControl control) {
             _tabItemControls.Add(control);
             this.ApplyScaleToTabItemControl(control);
+            this.ApplyAppearanceToTabItemControl(control);
 
             if (ReferenceEquals(control.DataContext, _keyboardTabNavigationExtension?.FocusedItem)) {
                 control.IsEditFocused = true;
@@ -2714,6 +2932,51 @@ namespace TabsManagerExtension.Controls {
         private void ApplyScaleToTabItemControl(TabItemControl control) {
             // Локальное значение имеет приоритет над дефолтом из подключённого BrushResources.xaml.
             control.Resources["AppTabItemHeight"] = this.ScaleFactorTabsCompactness * 26.4;
+        }
+
+        private void ApplyAppearance() {
+            this.ApplyAppearanceResources(this.Resources);
+            foreach (var tabItemControl in _tabItemControls) {
+                this.ApplyAppearanceToTabItemControl(tabItemControl);
+            }
+        }
+
+        private void ApplyAppearanceToTabItemControl(TabItemControl control) {
+            this.ApplyAppearanceResources(control.Resources);
+        }
+
+        private void ApplyAppearanceResources(ResourceDictionary resources) {
+            // Ресурсы записываются в корневой control и в созданные TabItemControl, поэтому изменения
+            // со страницы настроек видны сразу без пересоздания списка.
+            resources["AppTabsPanelBackgroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("panelBackgroundColor"));
+            resources["AppTabBackgroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("tabBackgroundColor"));
+            resources["AppTabBorderBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("tabBorderColor"));
+            resources["AppTabHoverBackgroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("tabHoverBackgroundColor"));
+            resources["AppTabHoverBorderBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("tabHoverBorderColor"));
+            resources["AppTabSelectedBackgroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("selectedTabBackgroundColor"));
+            resources["AppTabSelectedBorderBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("selectedTabBorderColor"));
+            resources["AppTabActiveBackgroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("activeTabBackgroundColor"));
+            resources["AppTabActiveBorderBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("activeTabBorderColor"));
+            resources["AppTabForegroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("tabTextColor"));
+            resources["AppTabHoverForegroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("tabHoverTextColor"));
+            resources["AppTabSelectedForegroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("selectedTabTextColor"));
+            resources["AppTabActiveForegroundBrush"] = CreateBrush(Settings.TabsManagerSettingsService.GetAppearanceColor("activeTabTextColor"));
+            resources["AppTabFontWeight"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("tabTextBold") ? FontWeights.Bold : FontWeights.Normal;
+            resources["AppTabFontStyle"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("tabTextItalic") ? FontStyles.Italic : FontStyles.Normal;
+            resources["AppTabItemFontSize"] = Settings.TabsManagerSettingsService.GetAppearanceNumber("tabTextSize");
+            resources["AppTabHoverFontWeight"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("tabHoverTextBold") ? FontWeights.Bold : FontWeights.Normal;
+            resources["AppTabHoverFontStyle"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("tabHoverTextItalic") ? FontStyles.Italic : FontStyles.Normal;
+            resources["AppTabHoverFontSize"] = Settings.TabsManagerSettingsService.GetAppearanceNumber("tabHoverTextSize");
+            resources["AppTabSelectedFontWeight"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("selectedTabTextBold") ? FontWeights.Bold : FontWeights.Normal;
+            resources["AppTabSelectedFontStyle"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("selectedTabTextItalic") ? FontStyles.Italic : FontStyles.Normal;
+            resources["AppTabSelectedFontSize"] = Settings.TabsManagerSettingsService.GetAppearanceNumber("selectedTabTextSize");
+            resources["AppTabActiveFontWeight"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("activeTabTextBold") ? FontWeights.Bold : FontWeights.Normal;
+            resources["AppTabActiveFontStyle"] = Settings.TabsManagerSettingsService.GetAppearanceBoolean("activeTabTextItalic") ? FontStyles.Italic : FontStyles.Normal;
+            resources["AppTabActiveFontSize"] = Settings.TabsManagerSettingsService.GetAppearanceNumber("activeTabTextSize");
+        }
+
+        private static SolidColorBrush CreateBrush(string value) {
+            return new SolidColorBrush((Color)ColorConverter.ConvertFromString(value));
         }
 
         private void SyncActiveDocumentWithPrimaryTabItem() {

@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Collections.Generic;
 
 namespace TabsManagerExtension {
@@ -26,6 +28,8 @@ namespace TabsManagerExtension.State.TextEditor {
 
 
     public static class AnchorParser {
+        // Для каждой позиции строится короткое окно строк: секционный шаблон может захватывать заголовок
+        // вместе со следующей строкой-разделителем, а шаблон подпункта — только текущую строку.
         public class SourceLine {
             public int Index { get; }
             public string Text { get; }
@@ -36,19 +40,19 @@ namespace TabsManagerExtension.State.TextEditor {
             }
         }
 
-        public static List<AnchorPoint> ParseLinesWithContextWindow(List<string> lines) {
+        public static List<AnchorPoint> ParseLinesWithContextWindow(
+            List<string> lines,
+            string sectionPattern,
+            string subsectionPattern
+        ) {
             var result = new List<AnchorPoint>();
+            var sectionRegex = CreateRegex(sectionPattern);
+            var subsectionRegex = CreateRegex(subsectionPattern);
             int i = 0;
 
             while (i < lines.Count) {
-                string trimmed = lines[i].TrimStart();
-                if (!trimmed.StartsWith("// ░")) {
-                    i++;
-                    continue;
-                }
-
                 var context = BuildContext(lines, i, linesAfter: 3);
-                var anchor = TryParseAnchor(context, out int linesConsumed);
+                var anchor = TryParseAnchor(context, sectionRegex, subsectionRegex, out int linesConsumed);
 
                 if (anchor != null) {
                     result.Add(anchor);
@@ -62,6 +66,24 @@ namespace TabsManagerExtension.State.TextEditor {
             return result;
         }
 
+        public static bool ContainsAnchor(
+            List<string> lines,
+            string sectionPattern,
+            string subsectionPattern
+        ) {
+            var sectionRegex = CreateRegex(sectionPattern);
+            var subsectionRegex = CreateRegex(subsectionPattern);
+
+            for (int i = 0; i < lines.Count; i++) {
+                var context = BuildContext(lines, i, linesAfter: 3);
+                if (TryParseAnchor(context, sectionRegex, subsectionRegex, out _) != null) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static List<SourceLine> BuildContext(List<string> lines, int startIndex, int linesAfter) {
             var context = new List<SourceLine>();
 
@@ -73,7 +95,17 @@ namespace TabsManagerExtension.State.TextEditor {
             return context;
         }
 
-        private static AnchorPoint? TryParseAnchor(List<SourceLine> contextLines, out int linesConsumed) {
+        private static Regex CreateRegex(string pattern) {
+            // Ограничение времени защищает UI от слишком дорогих пользовательских регулярных выражений.
+            return new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        }
+
+        private static AnchorPoint? TryParseAnchor(
+            List<SourceLine> contextLines,
+            Regex sectionRegex,
+            Regex subsectionRegex,
+            out int linesConsumed
+        ) {
             linesConsumed = 1;
 
             if (contextLines.Count == 0) {
@@ -81,33 +113,41 @@ namespace TabsManagerExtension.State.TextEditor {
             }
 
             var first = contextLines[0];
-            string line = first.Text.TrimStart();
+            // Шаблоны применяются с начала объединённого окна, поэтому номер якоря соответствует first.Index.
+            string contextText = string.Join(Environment.NewLine, contextLines.Select(sourceLine => sourceLine.Text));
 
-            if (!line.StartsWith("// ░")) {
-                return null;
+            var sectionMatch = TryMatch(sectionRegex, contextText);
+            if (TryGetTitle(sectionMatch, out string sectionTitle)) {
+                linesConsumed = CountConsumedLines(sectionMatch.Value);
+                return new AnchorPoint(sectionTitle, first.Index + 1, Enums.AnchorKind.Section);
             }
 
-            // Section: если есть подчёркивание в следующей строке
-            if (contextLines.Count >= 2) {
-                string second = contextLines[1].Text.TrimStart();
-                if (second.StartsWith("// ░░░")) {
-                    string title = line.TrimStart('/', ' ', '░').Trim();
-                    if (!string.IsNullOrEmpty(title)) {
-                        linesConsumed = 2;
-
-                        // используем first.Index + 1, так как в редакторе строки 1-based (первая строка — это 1, не 0)
-                        return new AnchorPoint(title, first.Index + 1, Enums.AnchorKind.Section);
-                    }
-                }
-            }
-
-            // Subsection (если без подчёркивания)
-            string title2 = line.TrimStart('/', ' ', '░').Trim();
-            if (!string.IsNullOrEmpty(title2)) {
-                return new AnchorPoint(title2, first.Index + 1, Enums.AnchorKind.Subsection);
+            var subsectionMatch = TryMatch(subsectionRegex, contextText);
+            if (TryGetTitle(subsectionMatch, out string subsectionTitle)) {
+                linesConsumed = CountConsumedLines(subsectionMatch.Value);
+                return new AnchorPoint(subsectionTitle, first.Index + 1, Enums.AnchorKind.Subsection);
             }
 
             return null;
+        }
+
+        private static Match TryMatch(Regex regex, string text) {
+            try {
+                return regex.Match(text);
+            }
+            catch (RegexMatchTimeoutException) {
+                // Пользовательский шаблон не должен блокировать UI редактора.
+                return Match.Empty;
+            }
+        }
+
+        private static bool TryGetTitle(Match match, out string title) {
+            title = match.Success && match.Index == 0 ? match.Groups["title"].Value.Trim() : string.Empty;
+            return !string.IsNullOrEmpty(title);
+        }
+
+        private static int CountConsumedLines(string matchedText) {
+            return Math.Max(1, matchedText.Count(character => character == '\n') + 1);
         }
 
         public static List<AnchorPoint> InsertSeparators(List<AnchorPoint> anchors) {
