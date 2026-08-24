@@ -1,6 +1,6 @@
-using Microsoft.VisualStudio.Extensibility;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.VisualStudio.Extensibility;
 
 namespace TabsManagerExtension {
     /// <summary>

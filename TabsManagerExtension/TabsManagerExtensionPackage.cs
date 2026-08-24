@@ -1,11 +1,6 @@
 ﻿using System;
 using System.Linq;
 using System.Text;
-using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Controls;
-using System.Windows.Threading;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -18,9 +13,9 @@ using System.ComponentModel.Design;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.VCProjectEngine;
 using Microsoft.VisualStudio.VCCodeModel;
 using Microsoft.VisualStudio.TextManager.Interop;
+using Microsoft.VisualStudio.VCProjectEngine;
 using Task = System.Threading.Tasks.Task;
 
 // Add AUTO_ENABLE_CUSTOM_TABS to DefineConstants to restore automatic left layout

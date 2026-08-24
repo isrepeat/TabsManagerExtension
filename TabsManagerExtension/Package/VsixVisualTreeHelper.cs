@@ -19,9 +19,9 @@ using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Utilities.UnifiedSettings;
-using Microsoft.VisualStudio.VCProjectEngine;
 using Microsoft.VisualStudio.VCCodeModel;
 using Microsoft.VisualStudio.TextManager.Interop;
+using Microsoft.VisualStudio.VCProjectEngine;
 using Task = System.Threading.Tasks.Task;
 
 

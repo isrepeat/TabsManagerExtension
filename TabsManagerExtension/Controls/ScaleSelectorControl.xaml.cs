@@ -3,8 +3,8 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
-using TabsManagerExtension.VsShell.TextEditor;
 using System.Windows.Threading;
+using TabsManagerExtension.VsShell.TextEditor;
 
 namespace TabsManagerExtension.Controls {
     public partial class ScaleSelectorControl : Helpers.BaseUserControl {
