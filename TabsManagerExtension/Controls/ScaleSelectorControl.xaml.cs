@@ -33,7 +33,7 @@ namespace TabsManagerExtension.Controls {
 
         public event EventHandler<double> ScaleChanged;
 
-        private TextBox _comboBoxTextBox;
+        private TextBox? _comboBoxTextBox;
         private double _minScale = 0.5;
         private double _maxScale = 1.5;
 
@@ -52,20 +52,27 @@ namespace TabsManagerExtension.Controls {
             Services.ExtensionServices.BeginUsage();
 
             this.ScaleComboBox.LostFocus += this.ScaleComboBox_OnLostFocus;
-            this.ScaleComboBox.KeyDown += this.ScaleComboBox_OnKeyDown;
             this.ScaleComboBox.SelectionChanged += this.ScaleComboBox_OnSelectionChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
 
             // Получаем ссылку на текстовое поле внутри ComboBox (editable part)
-            _comboBoxTextBox = (TextBox)this.ScaleComboBox.Template.FindName("PART_EditableTextBox", this.ScaleComboBox);
+            _comboBoxTextBox = this.ScaleComboBox.Template.FindName("PART_EditableTextBox", this.ScaleComboBox) as TextBox;
+            if (_comboBoxTextBox != null) {
+                _comboBoxTextBox.PreviewKeyDown += this.ScaleTextBox_OnPreviewKeyDown;
+            }
+
             this.SelectPresetForCurrentScale();
             this.UpdateComboBoxText();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.RemoveTrackedInputElement(this);
+            if (_comboBoxTextBox != null) {
+                _comboBoxTextBox.PreviewKeyDown -= this.ScaleTextBox_OnPreviewKeyDown;
+                _comboBoxTextBox = null;
+            }
+
             this.ScaleComboBox.SelectionChanged -= this.ScaleComboBox_OnSelectionChanged;
-            this.ScaleComboBox.KeyDown -= this.ScaleComboBox_OnKeyDown;
             this.ScaleComboBox.LostFocus -= this.ScaleComboBox_OnLostFocus;
 
             Services.ExtensionServices.EndUsage();
@@ -76,7 +83,7 @@ namespace TabsManagerExtension.Controls {
             this.ApplyScaleFromText();
         }
 
-        private void ScaleComboBox_OnKeyDown(object sender, KeyEventArgs e) {
+        private void ScaleTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e) {
             if (e.Key == Key.Enter) {
                 this.ApplyScaleFromText();
                 e.Handled = true;
@@ -87,12 +94,7 @@ namespace TabsManagerExtension.Controls {
             if (this.ScaleComboBox.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null) {
                 if (double.TryParse(selectedItem.Tag.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double scaleFactor)) {
                     scaleFactor = Helpers.Math.Clamp(scaleFactor, _minScale, _maxScale);
-
-                    if (Math.Abs(this.ScaleFactor - scaleFactor) > 0.001) {
-                        this.ScaleFactor = scaleFactor;
-                        this.ScaleChanged?.Invoke(this, this.ScaleFactor);
-                        this.UpdateComboBoxText();
-                    }
+                    this.CommitScale(scaleFactor);
                 }
             }
         }
@@ -103,12 +105,7 @@ namespace TabsManagerExtension.Controls {
 
                 if (double.TryParse(input, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double scaleValue)) {
                     scaleValue = Helpers.Math.Clamp(scaleValue / 100.0, _minScale, _maxScale);
-
-                    if (Math.Abs(this.ScaleFactor - scaleValue) > 0.001) {
-                        this.ScaleFactor = scaleValue;
-                        this.ScaleChanged?.Invoke(this, this.ScaleFactor);
-                        this.UpdateComboBoxText();
-                    }
+                    this.CommitScale(scaleValue);
                 }
                 else {
                     this.UpdateComboBoxText();
@@ -116,6 +113,19 @@ namespace TabsManagerExtension.Controls {
 
                 this.ScaleComboBox.SelectedItem = null;
             }
+        }
+
+        private void CommitScale(double scaleFactor) {
+            if (Math.Abs(this.ScaleFactor - scaleFactor) <= 0.001) {
+                this.UpdateComboBoxText();
+                return;
+            }
+
+            // SetCurrentValue сохраняет TwoWay binding с родительским контролом.
+            this.SetCurrentValue(ScaleFactorProperty, scaleFactor);
+            this.GetBindingExpression(ScaleFactorProperty)?.UpdateSource();
+            this.ScaleChanged?.Invoke(this, this.ScaleFactor);
+            this.UpdateComboBoxText();
         }
 
         private void UpdateComboBoxText() {

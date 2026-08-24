@@ -63,10 +63,15 @@
                 BorderThickness="0"
                 MaxWidth="300"
                 >
-            <ItemsControl x:Name="MenuItemsControl"
-                          ItemsSource="{Binding MenuItems, ElementName=__MenuControl}"
-                          ItemTemplateSelector="{Binding MenuItemTemplateSelector, ElementName=__MenuControl}"
-                          />
+            <ScrollViewer x:Name="MenuScrollViewer"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="True">
+                <ItemsControl x:Name="MenuItemsControl"
+                              ItemsSource="{Binding MenuItems, ElementName=__MenuControl}"
+                              ItemTemplateSelector="{Binding MenuItemTemplateSelector, ElementName=__MenuControl}"
+                              />
+            </ScrollViewer>
         </Border>
     </Popup>
 </helpers:BaseUserControl>

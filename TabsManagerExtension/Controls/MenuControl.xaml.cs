@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
-using System.Collections.ObjectModel;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Collections.ObjectModel;
+using FormsScreen = System.Windows.Forms.Screen;
+using DrawingPoint = System.Drawing.Point;
 
 namespace TabsManagerExtension.Controls {
     public partial class MenuControl : Helpers.BaseUserControl {
@@ -109,7 +111,11 @@ namespace TabsManagerExtension.Controls {
             this.MenuPopup.PlacementTarget = placementTarget;
             this.MenuPopup.StaysOpen = isStaysOpen;
             if (screenPosition.HasValue) {
+                this.UpdateMaximumMenuHeight(screenPosition.Value);
                 this.MoveMenu(screenPosition.Value);
+            }
+            else {
+                this.MenuScrollViewer.MaxHeight = Math.Max(0, SystemParameters.WorkArea.Height - 20);
             }
             this.MenuPopup.IsOpen = true;
         }
@@ -132,8 +138,26 @@ namespace TabsManagerExtension.Controls {
             }
 
             if (screenPosition.HasValue) {
+                this.UpdateMaximumMenuHeight(screenPosition.Value);
                 this.MoveMenu(screenPosition.Value);
             }
+        }
+
+        private void UpdateMaximumMenuHeight(Point screenPosition) {
+            var source = PresentationSource.FromVisual(this);
+            double dpiScaleX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1;
+            double dpiScaleY = source?.CompositionTarget?.TransformToDevice.M22 ?? 1;
+            var physicalPoint = new DrawingPoint(
+                (int)Math.Round(screenPosition.X * dpiScaleX),
+                (int)Math.Round(screenPosition.Y * dpiScaleY)
+            );
+
+            var workArea = FormsScreen.FromPoint(physicalPoint).WorkingArea;
+            double availableAbove = (physicalPoint.Y - workArea.Top) / dpiScaleY;
+            double availableBelow = (workArea.Bottom - physicalPoint.Y) / dpiScaleY;
+
+            // Popup сам выбирает сторону размещения; ограничиваем меню большей из доступных областей.
+            this.MenuScrollViewer.MaxHeight = Math.Max(0, Math.Max(availableAbove, availableBelow) - 20);
         }
 
         public void MoveMenu(Point screenPosition) {

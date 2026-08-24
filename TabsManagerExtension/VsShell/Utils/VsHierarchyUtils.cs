@@ -205,7 +205,7 @@ namespace TabsManagerExtension.VsShell.Utils {
                 typeof(TPropId) != typeof(__VSHPROPID9) &&
                 typeof(TPropId) != typeof(__VSHPROPID10) &&
                 typeof(TPropId) != typeof(__VSHPROPID11)) {
-                Helpers.Diagnostic.Logger.LogDebug($"Тип {typeof(TPropId).Name} не поддерживается для логирования.");
+                Helpers.Diagnostic.Logger.LogDebug($"Type {typeof(TPropId).Name} is not supported for logging.");
                 return;
             }
 

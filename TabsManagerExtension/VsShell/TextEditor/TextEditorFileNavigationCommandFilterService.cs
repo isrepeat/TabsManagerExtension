@@ -173,7 +173,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
                 _currentTextView = view;
             }
             else {
-                Helpers.Diagnostic.Logger.LogWarning($"[TextEditorCommandFilterController] Не удалось установить фильтр. HRESULT = 0x{result:X8}");
+                Helpers.Diagnostic.Logger.LogWarning($"[TextEditorCommandFilterController] Failed to install the filter. HRESULT = 0x{result:X8}");
             }
         }
 
