@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
-using System.Windows.Threading;
 using TabsManagerExtension.VsShell.TextEditor;
 
 namespace TabsManagerExtension.Controls {
@@ -31,8 +29,6 @@ namespace TabsManagerExtension.Controls {
                 new PropertyMetadata(1.0));
 
 
-        public event EventHandler<double> ScaleChanged;
-
         private TextBox? _comboBoxTextBox;
         private double _minScale = 0.5;
         private double _maxScale = 1.5;
@@ -42,38 +38,34 @@ namespace TabsManagerExtension.Controls {
             this.Loaded += this.OnLoaded;
             this.Unloaded += this.OnUnloaded;
 
-            // WARNING:
-            // Не присваивай this.DataContext = this — это может вызвать StackOverflow из-за биндингов вроде {Binding Text}.
-            // Такие биндинги могут замкнуться на унаследованные свойства Control.Text, Content и т.п.
-            // Используй ElementName / RelativeSource или выноси данные в отдельную ViewModel.
+            // Не назначаем DataContext = this: контрол должен наследовать DataContext родителя,
+            // чтобы внешние привязки, например ScaleFactorTabsCompactness, продолжали работать.
+            // Для обращения к свойствам самого контрола в XAML используем ElementName или RelativeSource.
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e) {
             Services.ExtensionServices.BeginUsage();
 
             this.ScaleComboBox.LostFocus += this.ScaleComboBox_OnLostFocus;
+            // Поле ввода внутри ComboBox создаётся самим WPF и может быть заменено, например,
+            // после смены темы. Тогда обработчик, подписанный прямо на старое поле ввода,
+            // перестанет работать. Поэтому обрабатываем Enter на самом ComboBox: нажатие
+            // сначала получает внутреннее поле, а затем WPF передаёт его родительскому ComboBox.
+            this.ScaleComboBox.KeyDown += this.ScaleComboBox_OnKeyDown;
             this.ScaleComboBox.SelectionChanged += this.ScaleComboBox_OnSelectionChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
 
             // Получаем ссылку на текстовое поле внутри ComboBox (editable part)
             _comboBoxTextBox = this.ScaleComboBox.Template.FindName("PART_EditableTextBox", this.ScaleComboBox) as TextBox;
-            if (_comboBoxTextBox != null) {
-                _comboBoxTextBox.PreviewKeyDown += this.ScaleTextBox_OnPreviewKeyDown;
-            }
-
-            this.SelectPresetForCurrentScale();
             this.UpdateComboBoxText();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.RemoveTrackedInputElement(this);
-            if (_comboBoxTextBox != null) {
-                _comboBoxTextBox.PreviewKeyDown -= this.ScaleTextBox_OnPreviewKeyDown;
-                _comboBoxTextBox = null;
-            }
-
             this.ScaleComboBox.SelectionChanged -= this.ScaleComboBox_OnSelectionChanged;
+            this.ScaleComboBox.KeyDown -= this.ScaleComboBox_OnKeyDown;
             this.ScaleComboBox.LostFocus -= this.ScaleComboBox_OnLostFocus;
+            _comboBoxTextBox = null;
 
             Services.ExtensionServices.EndUsage();
         }
@@ -83,7 +75,7 @@ namespace TabsManagerExtension.Controls {
             this.ApplyScaleFromText();
         }
 
-        private void ScaleTextBox_OnPreviewKeyDown(object sender, KeyEventArgs e) {
+        private void ScaleComboBox_OnKeyDown(object sender, KeyEventArgs e) {
             if (e.Key == Key.Enter) {
                 this.ApplyScaleFromText();
                 e.Handled = true;
@@ -93,8 +85,7 @@ namespace TabsManagerExtension.Controls {
         private void ScaleComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e) {
             if (this.ScaleComboBox.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag != null) {
                 if (double.TryParse(selectedItem.Tag.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double scaleFactor)) {
-                    scaleFactor = Helpers.Math.Clamp(scaleFactor, _minScale, _maxScale);
-                    this.CommitScale(scaleFactor);
+                    this.CommitScale(Helpers.Math.Clamp(scaleFactor, _minScale, _maxScale));
                 }
             }
         }
@@ -116,15 +107,12 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void CommitScale(double scaleFactor) {
-            if (Math.Abs(this.ScaleFactor - scaleFactor) <= 0.001) {
-                this.UpdateComboBoxText();
-                return;
+            if (Math.Abs(this.ScaleFactor - scaleFactor) > 0.001) {
+                // SetCurrentValue сохраняет TwoWay binding с родительским контролом.
+                this.SetCurrentValue(ScaleFactorProperty, scaleFactor);
+                this.GetBindingExpression(ScaleFactorProperty)?.UpdateSource();
             }
 
-            // SetCurrentValue сохраняет TwoWay binding с родительским контролом.
-            this.SetCurrentValue(ScaleFactorProperty, scaleFactor);
-            this.GetBindingExpression(ScaleFactorProperty)?.UpdateSource();
-            this.ScaleChanged?.Invoke(this, this.ScaleFactor);
             this.UpdateComboBoxText();
         }
 
@@ -144,16 +132,5 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
-        private void SelectPresetForCurrentScale() {
-            this.ScaleComboBox.SelectedItem = this.ScaleComboBox.Items
-                .OfType<ComboBoxItem>()
-                .FirstOrDefault(item =>
-                    double.TryParse(
-                        item.Tag?.ToString(),
-                        System.Globalization.NumberStyles.Any,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        out double presetScale) &&
-                    Math.Abs(presetScale - this.ScaleFactor) <= 0.001);
-        }
     }
 }

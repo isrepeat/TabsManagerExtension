@@ -382,8 +382,13 @@ namespace TabsManagerExtension.Controls {
             bool isButtonInteraction = originalSource is System.Windows.Controls.Primitives.ButtonBase ||
                 originalSource != null && Helpers.VisualTree.FindParentByType<System.Windows.Controls.Primitives.ButtonBase>(originalSource) != null;
 
-            // Клик по вкладке или кнопке имеет собственную семантику и не считается кликом по пустой области.
-            if (isInsideDocumentContainer && !isTabInteraction && !isButtonInteraction) {
+            // Popup может визуально находиться над DocumentContainer, хотя логически относится
+            // к ComboBox в нижней панели. Общая проверка интерактивного пути существовала до
+            // 5ac1151 и не даёт принять ComboBoxItem/TextBox за клик по пустой области вкладок.
+            bool isInteractiveInteraction = originalSource != null && this.ex_HasInteractiveElementOnPathFrom(originalSource);
+            // Клик по вкладке или любому интерактивному контролу имеет собственную семантику
+            // и не считается кликом по пустой области.
+            if (isInsideDocumentContainer && !isTabInteraction && !isButtonInteraction && !isInteractiveInteraction) {
                 // Сбрасываем мультивыбор явно: повторная активация уже открытого документа
                 // может не породить событие DTE после команд контекстного меню.
                 var activeFrameTabItem = this.SortedTabItemsGroups
@@ -534,22 +539,10 @@ namespace TabsManagerExtension.Controls {
 
                     var watcherToDispose = _fileWatcher;
                     _fileWatcher = null;
-
-                    // DispatcherPriority.ApplicationIdle — ждет, пока текущий UI-цикл и все запланированные задачи завершатся.
-                    // Таким образом Dispose() вызывается после завершения Run(...) внутри событий FileSystemWatcher
-                    VsixThreadHelper.RunOnUiThread(Dispatcher, () => {
-                        try {
-                            // Копируем ссылку на _fileWatcher чтобы продлить жизнь, т.к. _fileWatcher уже может быть удален
-                            // во время исполнения лямбды, но его ресурсы так и не будут освобождены.
-                            watcherToDispose.Dispose();
-                        }
-                        catch (Exception ex) {
-                            Helpers.Diagnostic.Logger.LogError($"Delayed dispose of FileSystemWatcher failed: {ex}");
-                        }
-                    }, DispatcherPriority.ApplicationIdle);
+                    watcherToDispose.Dispose();
                 }
                 catch (Exception ex) {
-                    Helpers.Diagnostic.Logger.LogError($"Error while scheduling FileSystemWatcher disposal: {ex}");
+                    Helpers.Diagnostic.Logger.LogError($"Error while disposing FileSystemWatcher: {ex}");
                 }
             }
         }
@@ -833,10 +826,7 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
-            ThreadHelper.JoinableTaskFactory.Run(async () => {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                this.UpdateDocumentUI(e.FullPath);
-            });
+            this.ScheduleFileWatcherUpdate(sender, () => this.UpdateDocumentUI(e.FullPath));
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs e) {
@@ -846,10 +836,7 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
-            ThreadHelper.JoinableTaskFactory.Run(async () => {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                this.UpdateDocumentUI(e.OldFullPath, e.FullPath);
-            });
+            this.ScheduleFileWatcherUpdate(sender, () => this.UpdateDocumentUI(e.OldFullPath, e.FullPath));
         }
 
         private void OnFileDeleted(object sender, FileSystemEventArgs e) {
@@ -859,14 +846,40 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
-            ThreadHelper.JoinableTaskFactory.Run(async () => {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            this.ScheduleFileWatcherUpdate(sender, () => {
                 var documentFullName = e.FullPath;
                 var tabItemDocument = this.FindTabItem(documentFullName);
                 if (tabItemDocument != null) {
                     this.RemoveTabItemFromGroups(tabItemDocument);
                 }
             });
+        }
+
+        private void ScheduleFileWatcherUpdate(object sender, Action update) {
+            // FileSystemWatcher вызывает обработчики на фоновом потоке. Нельзя синхронно ждать
+            // перехода на UI-поток: при закрытии Visual Studio UI уже занят остановкой пакетов,
+            // и оба потока могут навсегда начать ждать друг друга.
+            if (this.Dispatcher.HasShutdownStarted || this.Dispatcher.HasShutdownFinished) {
+                return;
+            }
+
+            try {
+                this.Dispatcher.BeginInvoke(
+                    new Action(() => {
+                        // Пока действие стояло в очереди, решение могло закрыться, а watcher —
+                        // быть заменён. В таком случае событие относится к уже неактуальному решению.
+                        if (_isSolutionClosing || !ReferenceEquals(sender, _fileWatcher)) {
+                            return;
+                        }
+
+                        update();
+                    }),
+                    DispatcherPriority.Background
+                );
+            }
+            catch (InvalidOperationException) {
+                // Dispatcher уже завершился между проверкой состояния и постановкой действия.
+            }
         }
 
 
@@ -1208,26 +1221,28 @@ namespace TabsManagerExtension.Controls {
 
             // Снимок создаётся до вызова DTE Close(): DocumentClosing приходит синхронно и сразу
             // удаляет TabItem вместе с информацией о его исходной группе.
-            var entries = tabItems
-                .Select(this.CreateClosedTabEntry)
+            var closeRequests = tabItems
+                .Select(tabItem => new {
+                    TabItem = tabItem,
+                    Entry = this.CreateClosedTabEntry(tabItem)
+                })
                 .ToList();
-            if (entries.Count > 0) {
-                this.PushClosedTabsOperation(entries);
-                foreach (var tabItem in tabItems) {
-                    // Помечаем всю пачку заранее: каждое последующее событие закрытия только
-                    // погасит свой ключ и не раздробит одну операцию на несколько undo-шагов.
-                    _tabsBeingClosed.Add(this.GetHistoryKey(tabItem));
-                }
+            foreach (var request in closeRequests) {
+                // Помечаем всю пачку заранее: каждое последующее событие закрытия только
+                // погасит свой ключ и не раздробит одну операцию на несколько undo-шагов.
+                _tabsBeingClosed.Add(this.GetHistoryKey(request.TabItem));
             }
 
             // Используем заранее созданный снимок: DocumentClosing синхронно удаляет элементы
             // из групп и одновременно перестраивает текущее выделение.
-            foreach (var tabItem in tabItems) {
+            var closedEntries = new List<ClosedTabEntry>();
+            foreach (var request in closeRequests) {
+                var tabItem = request.TabItem;
+                string historyKey = this.GetHistoryKey(tabItem);
                 try {
                     if (tabItem is TabItemDocument tabItemDocument) {
                         Helpers.Diagnostic.Logger.LogDebug($"close document \"{tabItemDocument.ShellDocument.Document.FullName}\"");
-                        // ShellDocument повторно находит актуальный VS-фрейм по moniker. Сохранённый EnvDTE.Document
-                        // может быть устаревшим для вкладок из Miscellaneous Files и файлов без проекта.
+                        // ShellDocument повторно находит актуальный DTE-документ по moniker.
                         tabItemDocument.ShellDocument.Close();
                         // Документ будет удалён через OnDocumentClosing.
                     }
@@ -1240,9 +1255,24 @@ namespace TabsManagerExtension.Controls {
                     }
                 }
                 catch (Exception ex) {
-                    _tabsBeingClosed.Remove(this.GetHistoryKey(tabItem));
                     Helpers.Diagnostic.Logger.LogError($"Failed to close tab '{tabItem.Caption}': {ex}");
                 }
+                finally {
+                    if (this.FindTabItemWithGroup(tabItem) == null) {
+                        closedEntries.Add(request.Entry);
+                    }
+                    else {
+                        Helpers.Diagnostic.Logger.LogWarning($"Tab '{tabItem.Caption}' remained open after close request");
+                    }
+
+                    // При отмене диалога сохранения DocumentClosing не приходит. Не оставляем
+                    // ключ, который подавил бы историю следующего настоящего закрытия.
+                    _tabsBeingClosed.Remove(historyKey);
+                }
+            }
+
+            if (closedEntries.Count > 0) {
+                this.PushClosedTabsOperation(closedEntries);
             }
 
             this.VirtualMenuControl.HideImmediately();
@@ -1971,8 +2001,9 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void ApplyScaleTabsCompactness() {
+            double requestedHeight = this.ScaleFactorTabsCompactness * 26.4;
             // Новая база 100% равна прежней высоте при 120%: 22 * 1.2 = 26.4.
-            Helpers.BaseUserControlResourceHelper.UpdateDynamicResource(this, "AppTabItemHeight", this.ScaleFactorTabsCompactness * 26.4);
+            Helpers.BaseUserControlResourceHelper.UpdateDynamicResource(this, "AppTabItemHeight", requestedHeight);
 
             // Вкладки материализуются позже родительского контрола и получают отдельные экземпляры
             // ResourceDictionary, поэтому обновляем уже созданные элементы также напрямую.
@@ -2930,8 +2961,8 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void ApplyScaleToTabItemControl(TabItemControl control) {
-            // Локальное значение имеет приоритет над дефолтом из подключённого BrushResources.xaml.
-            control.Resources["AppTabItemHeight"] = this.ScaleFactorTabsCompactness * 26.4;
+            double requestedHeight = this.ScaleFactorTabsCompactness * 26.4;
+            control.SetTabHeight(requestedHeight);
         }
 
         private void ApplyAppearance() {

@@ -221,6 +221,13 @@ namespace TabsManagerExtension.Controls {
             Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.RestoreTabNavigationInputTarget();
         }
 
+        internal void SetTabHeight(double height) {
+            // Локальное значение реального контейнера немедленно инвалидирует layout.
+            // Подмена ключа поверх уже разрешённого DynamicResource срабатывает только
+            // после следующего пересчёта стиля (например, при смене hover/focus).
+            this.TabContainer.Height = height;
+        }
+
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
             // Клик внутри поля нужен только для установки каретки/выделения. Не запускаем
             // навигацию вкладки, иначе она забирает фокус и преждевременно завершает rename.

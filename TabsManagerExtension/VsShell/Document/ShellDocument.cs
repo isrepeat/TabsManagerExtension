@@ -33,25 +33,19 @@ namespace TabsManagerExtension.VsShell.Document {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             string documentPath = this.Document.FullName;
-            if (VsShellUtilities.IsDocumentOpen(
-                ServiceProvider.GlobalProvider,
-                documentPath,
-                VSConstants.LOGVIEWID_Any,
-                out _,
-                out _,
-                out var windowFrame
-            ) && windowFrame != null) {
-                // Закрываем найденный по moniker фрейм, а не сохранённую DTE-обёртку документа.
-                // Это особенно важно для Miscellaneous Files, у которых нет стабильной project hierarchy.
-                ErrorHandler.ThrowOnFailure(windowFrame.CloseFrame((uint)__FRAMECLOSE.FRAMECLOSE_PromptSave));
-                return;
-            }
-
-            // Fallback сохраняет прежнее поведение для нестандартных редакторов, которые не публикуют IVsWindowFrame.
             var currentDocument = PackageServices.Dte2.Documents
                 .Cast<EnvDTE.Document>()
                 .FirstOrDefault(document => string.Equals(document.FullName, documentPath, StringComparison.OrdinalIgnoreCase));
-            (currentDocument ?? this.Document).Close(EnvDTE.vsSaveChanges.vsSaveChangesPrompt);
+            if (currentDocument != null) {
+                // DTE координирует последовательное закрытие документов. Прямой CloseFrame при
+                // закрытии пачки может оставить часть уже скрытых фреймов незакрытыми, и VS
+                // повторно покажет их при следующей активации документа.
+                currentDocument.Close(EnvDTE.vsSaveChanges.vsSaveChangesPrompt);
+                return;
+            }
+
+            // Fallback нужен для устаревшей DTE-обёртки, которая ещё не исчезла из модели вкладки.
+            this.Document.Close(EnvDTE.vsSaveChanges.vsSaveChangesPrompt);
         }
 
       

@@ -474,8 +474,7 @@
             <localControls:ScaleSelectorControl Grid.Column="0"
                                                 Style="{StaticResource CustomScaleSelectorControlStyle}"
                                                 Title="Tabs: "
-                                                ScaleFactor="{Binding ScaleFactorTabsCompactness, Mode=TwoWay}"
-                                                />
+                                                ScaleFactor="{Binding ScaleFactorTabsCompactness, Mode=TwoWay}" />
         </Grid>
 
         <!-- Стек длительных фоновых операций расширения -->

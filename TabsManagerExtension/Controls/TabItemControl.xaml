@@ -159,9 +159,9 @@
 
 
     <Grid>
-        <CheckBox Style="{StaticResource SelectableCheckBoxContainerStyle}"
-                  IsChecked="{Binding IsSelected, ElementName=__TabItemControl, Mode=TwoWay}"
-                  >
+        <CheckBox x:Name="TabContainer"
+                  Style="{StaticResource SelectableCheckBoxContainerStyle}"
+                  IsChecked="{Binding IsSelected, ElementName=__TabItemControl, Mode=TwoWay}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />

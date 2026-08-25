@@ -81,8 +81,7 @@
                                    AllowsTransparency="True" 
                                    Focusable="False" 
                                    PopupAnimation="Slide"
-                                   StaysOpen="False"
-                                   >
+                                   StaysOpen="False">
                                 <Border Background="#333333" 
                                         BorderBrush="#555555" 
                                         BorderThickness="1"
@@ -90,7 +89,8 @@
                                         MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
                                         >
                                     <ScrollViewer Background="#333333" Foreground="White">
-                                        <StackPanel IsItemsHost="True" Background="#333333"/>
+                                        <StackPanel IsItemsHost="True"
+                                                    Background="#333333" />
                                     </ScrollViewer>
                                 </Border>
                             </Popup>
