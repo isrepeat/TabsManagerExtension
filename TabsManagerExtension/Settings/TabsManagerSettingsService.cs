@@ -17,6 +17,11 @@ namespace TabsManagerExtension.Settings {
     // Единственный источник пользовательских значений — локальный settings.json. Unified Settings используется
     // только как мост для нескольких элементов стандартного окна Options и не хранит оформление панели.
     internal static class TabsManagerSettingsService {
+        private sealed class LegacyToolWindowState {
+            public List<string>? OpenToolWindowIds { get; set; }
+            public string? ActiveToolWindowId { get; set; }
+        }
+
         public const string DefaultAnchorSectionPattern = @"^\s*//\s*░(?!░)\s*(?<title>[^\r\n]+?)\s*\r?\n\s*//\s*░{3,}\s*(?=\r?\n|$)";
         public const string DefaultAnchorSubsectionPattern = @"^\s*//\s*░(?!░)\s*(?<title>[^\r\n]+?)\s*(?=\r?\n|$)";
 
@@ -422,10 +427,8 @@ namespace TabsManagerExtension.Settings {
                 var settings = Load();
 
                 // В настройки попадают только GUID окон без повторов, но в исходном порядке.
-                var newWindowIds = windowIds.Where(id => Guid.TryParse(id, out _)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                string? newActiveWindowId = Guid.TryParse(activeWindowId, out _) && newWindowIds.Contains(activeWindowId, StringComparer.OrdinalIgnoreCase)
-                    ? activeWindowId
-                    : null;
+                var newWindowIds = NormalizeToolWindowIds(windowIds);
+                string? newActiveWindowId = NormalizeActiveToolWindowId(activeWindowId, newWindowIds);
                 if (settings.OpenToolWindowIds.SequenceEqual(newWindowIds, StringComparer.OrdinalIgnoreCase) &&
                     string.Equals(settings.ActiveToolWindowId, newActiveWindowId, StringComparison.OrdinalIgnoreCase)) {
 
@@ -606,20 +609,27 @@ namespace TabsManagerExtension.Settings {
                 : Helpers.Math.Clamp(value, 0.5, 1.5);
         }
 
+        private static List<string> NormalizeToolWindowIds(IEnumerable<string>? windowIds) {
+            return windowIds?
+                .Where(id => Guid.TryParse(id, out _))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? new List<string>();
+        }
+
+        private static string? NormalizeActiveToolWindowId(string? activeWindowId, IReadOnlyCollection<string> windowIds) {
+            return Guid.TryParse(activeWindowId, out _) && windowIds.Contains(activeWindowId!, StringComparer.OrdinalIgnoreCase)
+                ? activeWindowId
+                : null;
+        }
+
         private static TabsManagerSettings Load() {
             if (_settings != null) {
                 return _settings;
             }
 
-            // Старый configuration.json читается только один раз для миграции; следующий Save создаёт settings.json.
-            bool migratedLegacySettings = false;
             try {
                 if (File.Exists(_settingsPath)) {
                     _settings = JsonConvert.DeserializeObject<TabsManagerSettings>(File.ReadAllText(_settingsPath));
-                }
-                else if (File.Exists(_legacySettingsPath)) {
-                    _settings = JsonConvert.DeserializeObject<TabsManagerSettings>(File.ReadAllText(_legacySettingsPath));
-                    migratedLegacySettings = true;
                 }
             }
             catch (Exception ex) {
@@ -627,20 +637,64 @@ namespace TabsManagerExtension.Settings {
             }
 
             _settings ??= new TabsManagerSettings();
+
+            // configuration.json мог обновляться старой версией уже после создания settings.json.
+            // Поэтому переносим из него только состояние tool window, не затрагивая новые настройки.
+            bool migratedLegacySettings = TryMergeLegacyToolWindowState(_settings);
             _settings.AnchorSectionPattern ??= DefaultAnchorSectionPattern;
             _settings.AnchorSubsectionPattern ??= DefaultAnchorSubsectionPattern;
             _settings.ActiveSettingsSection ??= "main";
-            _settings.OpenToolWindowIds ??= new List<string>();
+            _settings.OpenToolWindowIds = NormalizeToolWindowIds(_settings.OpenToolWindowIds);
+            _settings.ActiveToolWindowId = NormalizeActiveToolWindowId(_settings.ActiveToolWindowId, _settings.OpenToolWindowIds);
             _settings.Appearance ??= new Dictionary<string, string>();
 
             if (migratedLegacySettings) {
-                Save(_settings);
+                _settings.Version = 2;
+                if (Save(_settings)) {
+                    DeleteLegacySettings();
+                }
             }
 
             return _settings;
         }
 
-        private static void Save(TabsManagerSettings settings) {
+        private static bool TryMergeLegacyToolWindowState(TabsManagerSettings settings) {
+            if (!File.Exists(_legacySettingsPath)) {
+                return false;
+            }
+
+            try {
+                var legacyState = JsonConvert.DeserializeObject<LegacyToolWindowState>(File.ReadAllText(_legacySettingsPath));
+                if (legacyState == null) {
+                    return false;
+                }
+
+                settings.OpenToolWindowIds = NormalizeToolWindowIds(legacyState.OpenToolWindowIds);
+                settings.ActiveToolWindowId = NormalizeActiveToolWindowId(
+                    legacyState.ActiveToolWindowId,
+                    settings.OpenToolWindowIds
+                );
+
+                return true;
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogError($"Failed to migrate legacy Tabs Manager configuration: {ex}");
+                return false;
+            }
+        }
+
+        private static void DeleteLegacySettings() {
+            try {
+                File.Delete(_legacySettingsPath);
+                Helpers.Diagnostic.Logger.LogDebug("[Settings] Legacy configuration.json migrated to settings.json and removed.");
+            }
+            catch (Exception ex) {
+                // При сбое удаления оставляем файл: следующий запуск безопасно повторит миграцию.
+                Helpers.Diagnostic.Logger.LogWarning($"Failed to remove legacy Tabs Manager configuration: {ex}");
+            }
+        }
+
+        private static bool Save(TabsManagerSettings settings) {
             try {
                 Directory.CreateDirectory(_settingsDirectory);
                 // Сначала пишем полный временный файл, чтобы сбой процесса не оставил частично записанный JSON.
@@ -653,9 +707,12 @@ namespace TabsManagerExtension.Settings {
                 else {
                     File.Move(temporaryPath, _settingsPath);
                 }
+
+                return true;
             }
             catch (Exception ex) {
                 Helpers.Diagnostic.Logger.LogError($"Failed to save Tabs Manager settings: {ex}");
+                return false;
             }
         }
     }
