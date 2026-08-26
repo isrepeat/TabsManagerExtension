@@ -7,6 +7,7 @@ using TMEx = TabsManagerExtension;
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Формирует пункты context и virtual menu из команд вкладок.</summary>
     internal sealed class TabMenuItemFactory {
+        private readonly Helpers.RelayCommand<object> _pinCommand;
         private readonly Helpers.RelayCommand<object> _copyNameCommand;
         private readonly Helpers.RelayCommand<object> _copyPathCommand;
         private readonly Helpers.RelayCommand<object> _openLocationCommand;
@@ -16,6 +17,7 @@ namespace TabsManagerExtension.Controls.Tabs {
         private readonly Helpers.RelayCommand<object> _reloadProjectsCommand;
 
         public TabMenuItemFactory(
+            Action<object> onPin,
             Action<object> onCopyName,
             Action<object> onCopyPath,
             Action<object> onOpenLocation,
@@ -24,6 +26,7 @@ namespace TabsManagerExtension.Controls.Tabs {
             Action<object> onMoveToProject,
             Action<object> onReloadProjects
             ) {
+            _pinCommand = new Helpers.RelayCommand<object>(onPin);
             _copyNameCommand = new Helpers.RelayCommand<object>(onCopyName);
             _copyPathCommand = new Helpers.RelayCommand<object>(onCopyPath);
             _openLocationCommand = new Helpers.RelayCommand<object>(onOpenLocation);
@@ -35,6 +38,7 @@ namespace TabsManagerExtension.Controls.Tabs {
 
         public IReadOnlyList<Helpers.IMenuItem> CreateSingleSelectionContextMenu(TMEx.State.Document.TabItemBase tabItem) {
             var items = new List<Helpers.IMenuItem> {
+                this.CreateCommand(State.Constants.UI.PinTab, _pinCommand, tabItem),
                 this.CreateCommand(State.Constants.UI.CopyTabName, _copyNameCommand, tabItem),
                 this.CreateCommand(State.Constants.UI.CopyTabPath, _copyPathCommand, tabItem),
                 new Helpers.MenuItemSeparator()
@@ -55,7 +59,8 @@ namespace TabsManagerExtension.Controls.Tabs {
             ) {
             return new Helpers.IMenuItem[] {
                 // Popup закрывается до выполнения команды. Снимок selection не даёт клику по
-                // меню изменить набор вкладок, чьи значения нужно скопировать.
+                // меню изменить набор вкладок, к которым применяется команда.
+                this.CreateCommand(State.Constants.UI.PinTabs, _pinCommand, selectedTabItems),
                 this.CreateCommand(State.Constants.UI.CopyTabNames, _copyNameCommand, selectedTabItems),
                 this.CreateCommand(State.Constants.UI.CopyTabPaths, _copyPathCommand, selectedTabItems),
                 new Helpers.MenuItemSeparator(),

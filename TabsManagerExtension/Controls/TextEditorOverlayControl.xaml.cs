@@ -379,12 +379,37 @@ namespace TabsManagerExtension.Controls {
 
         private void FindNext() {
             ThreadHelper.ThrowIfNotOnUIThread();
-            PackageServices.Dte2.ExecuteCommand("Edit.FindNext");
+            this.ExecuteFindInCurrentDocument("Edit.FindNext");
         }
 
         private void FindPrevious() {
             ThreadHelper.ThrowIfNotOnUIThread();
-            PackageServices.Dte2.ExecuteCommand("Edit.FindPrevious");
+            this.ExecuteFindInCurrentDocument("Edit.FindPrevious");
+        }
+
+        private void ExecuteFindInCurrentDocument(string commandName) {
+            // Стрелки оверлея не должны наследовать scope из штатной Quick Find. Меняем его
+            // только на время команды и сразу возвращаем, чтобы пользовательское значение в
+            // выпадающем списке (например, Entire solution) осталось прежним.
+            if (!this.TryGetCurrentDocumentSearchScope(out var scope, out var findManager)) {
+                Helpers.Diagnostic.Logger.LogWarning("[TextEditorOverlay] Quick Find current document scope was not found.");
+                return;
+            }
+
+            var currentScopeProperty = findManager.GetType().GetProperty("CurrentScope");
+            if (currentScopeProperty == null || !currentScopeProperty.CanWrite) {
+                Helpers.Diagnostic.Logger.LogWarning("[TextEditorOverlay] Quick Find current scope cannot be changed.");
+                return;
+            }
+
+            object? originalScope = currentScopeProperty.GetValue(findManager);
+            try {
+                currentScopeProperty.SetValue(findManager, scope);
+                PackageServices.Dte2.ExecuteCommand(commandName);
+            }
+            finally {
+                currentScopeProperty.SetValue(findManager, originalScope);
+            }
         }
 
         private void FindInSolution() {
@@ -429,6 +454,35 @@ namespace TabsManagerExtension.Controls {
                 foreach (var item in scopes) {
                     var candidateScope = item == null ? null : TryUnwrapSearchScope(item);
                     if (candidateScope == null || !IsSolutionSearchScope(candidateScope)) {
+                        continue;
+                    }
+
+                    scope = candidateScope;
+                    findManager = candidateManager;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryGetCurrentDocumentSearchScope(out object scope, out object findManager) {
+            scope = null!;
+            findManager = null!;
+
+            if (_findAdornmentLayer == null) {
+                return false;
+            }
+
+            foreach (var element in _findAdornmentLayer.Elements) {
+                var candidateManager = TryGetQuickFindManager(element.Adornment);
+                if (candidateManager?.GetType().GetProperty("ScopesCollection")?.GetValue(candidateManager) is not System.Collections.IEnumerable scopes) {
+                    continue;
+                }
+
+                foreach (var item in scopes) {
+                    var candidateScope = item == null ? null : TryUnwrapSearchScope(item);
+                    if (candidateScope == null || !IsCurrentDocumentSearchScope(candidateScope)) {
                         continue;
                     }
 
@@ -498,6 +552,17 @@ namespace TabsManagerExtension.Controls {
                 .First(type => type.FullName == "Microsoft.VisualStudio.Find.ISearchScope");
             string? displayName = searchScopeInterface.GetProperty("DisplayName")?.GetValue(scope) as string;
             return string.Equals(displayName, "Entire solution", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCurrentDocumentSearchScope(object scope) {
+            if (scope.GetType().Name.IndexOf("CurrentDocumentScope", StringComparison.Ordinal) >= 0) {
+                return true;
+            }
+
+            var searchScopeInterface = scope.GetType().GetInterfaces()
+                .First(type => type.FullName == "Microsoft.VisualStudio.Find.ISearchScope");
+            string? displayName = searchScopeInterface.GetProperty("DisplayName")?.GetValue(scope) as string;
+            return string.Equals(displayName, "Current document", StringComparison.OrdinalIgnoreCase);
         }
 
         private void SubscribeToCaret() {

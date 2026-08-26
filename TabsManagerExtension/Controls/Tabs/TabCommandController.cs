@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -34,6 +34,13 @@ namespace TabsManagerExtension.Controls.Tabs {
 
         public void Pin(object parameter) {
             ThreadHelper.ThrowIfNotOnUIThread();
+            if (parameter is IReadOnlyList<TMEx.State.Document.TabItemBase> tabItems) {
+                foreach (var tabItemToPin in tabItems) {
+                    this.Pin(tabItemToPin);
+                }
+                return;
+            }
+
             if (parameter is not TMEx.State.Document.TabItemBase tabItem || tabItem.IsPinnedTab) {
                 return;
             }

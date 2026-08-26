@@ -214,6 +214,7 @@ namespace TabsManagerExtension.Controls {
             this.OnCopySelectedTabNamesCommand = new Helpers.RelayCommand<object>(this.OnCopyTabName);
 
             _tabMenuItemFactory = new TMEx.Controls.Tabs.TabMenuItemFactory(
+                this.OnPinTabItem,
                 this.OnCopyTabName,
                 this.OnCopyTabPath,
                 this.OnOpenLocationTabItem,
