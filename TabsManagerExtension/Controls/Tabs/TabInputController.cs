@@ -7,7 +7,6 @@ using System.Collections.Generic;
 
 using TMEx = TabsManagerExtension;
 
-
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Управляет клавиатурной и мышиной навигацией, edit mode и WPF-фокусом вкладок.</summary>
     internal sealed class TabInputController {

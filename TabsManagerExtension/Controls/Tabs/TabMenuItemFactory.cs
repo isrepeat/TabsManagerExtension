@@ -1,8 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Формирует пункты context и virtual menu из команд вкладок.</summary>

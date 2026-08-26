@@ -1,7 +1,6 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Windows.Threading;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Наблюдает за файлами solution и маршалит события FileSystemWatcher в WPF Dispatcher.</summary>

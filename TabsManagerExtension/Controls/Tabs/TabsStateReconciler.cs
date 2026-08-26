@@ -1,11 +1,10 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows.Threading;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell;
 
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Периодически сверяет модели вкладок с фактическим состоянием Visual Studio.</summary>

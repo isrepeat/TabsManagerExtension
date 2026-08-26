@@ -1,21 +1,9 @@
 ﻿using System;
-using System.Linq;
-using System.Text;
 using System.Runtime.InteropServices;
-using System.Runtime.CompilerServices;
 using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using System.ComponentModel;
-using System.ComponentModel.Design;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.VCCodeModel;
-using Microsoft.VisualStudio.TextManager.Interop;
-using Microsoft.VisualStudio.VCProjectEngine;
 using Microsoft.VisualStudio.ExtensionManager;
 using Task = System.Threading.Tasks.Task;
 
@@ -29,7 +17,6 @@ namespace System.Runtime.CompilerServices {
     internal static class IsExternalInit { } // need for "init" keyword
 }
 #endif
-
 
 namespace TabsManagerExtension {
     /// <summary>

@@ -1,12 +1,7 @@
 ﻿using System;
-using System.Linq;
 using System.ComponentModel;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
-using Helpers.Attributes;
-using Helpers.Ex;
 
+using Helpers.Attributes;
 
 namespace TabsManagerExtension.VsShell.Document {
     namespace _Details {

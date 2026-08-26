@@ -1,10 +1,9 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows.Threading;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Microsoft.VisualStudio.Shell;
-
 
 namespace TabsManagerExtension.Services {
     public sealed class ExtensionStatusService :

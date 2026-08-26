@@ -1,10 +1,9 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell;
 
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Единая точка поиска и изменения групп и моделей вкладок.</summary>

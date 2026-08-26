@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Collections.Generic;
 
-
 namespace TabsManagerExtension.Services {
     public interface IExtensionService {
         /// <summary>

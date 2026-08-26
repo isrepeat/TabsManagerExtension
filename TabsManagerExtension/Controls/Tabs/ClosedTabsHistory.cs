@@ -1,9 +1,8 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Collections.Generic;
 
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     internal enum ClosedTabKind {

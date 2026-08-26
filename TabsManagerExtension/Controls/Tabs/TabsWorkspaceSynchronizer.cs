@@ -5,7 +5,6 @@ using Microsoft.VisualStudio.Shell;
 
 using TMEx = TabsManagerExtension;
 
-
 namespace TabsManagerExtension.Controls.Tabs {
     // Синхронизирует модели вкладок с жизненным циклом solution, DTE-документов,
     // tool window и файлов на диске. Здесь же формируется история закрытых вкладок.

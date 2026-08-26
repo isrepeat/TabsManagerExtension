@@ -1,11 +1,10 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell;
 
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     internal sealed class TabRenameResult {

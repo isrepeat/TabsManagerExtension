@@ -1,12 +1,10 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio;
-using System.Linq;
-using System.Runtime.InteropServices;
-
 
 namespace TabsManagerExtension.VsShell.Project {
     public class ShellProject {

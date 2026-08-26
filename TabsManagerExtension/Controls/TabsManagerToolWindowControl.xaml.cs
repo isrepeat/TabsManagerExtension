@@ -6,14 +6,11 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.TextManager.Interop;
 
 using Helpers.Ex;
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls {
     public partial class TabsManagerToolWindowControl : Helpers.BaseUserControl {

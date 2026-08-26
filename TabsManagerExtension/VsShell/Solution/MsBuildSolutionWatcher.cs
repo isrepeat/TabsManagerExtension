@@ -1,11 +1,10 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
 using Microsoft.Build.Locator;
 using Microsoft.Build.Evaluation;
 using Microsoft.VisualStudio.Shell;
-
 
 namespace TabsManagerExtension.VsShell.Solution {
     public static class MsBuildEnvironment {

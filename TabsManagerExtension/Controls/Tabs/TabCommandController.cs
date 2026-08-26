@@ -8,7 +8,6 @@ using Microsoft.VisualStudio.Shell;
 
 using TMEx = TabsManagerExtension;
 
-
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Выполняет пользовательские команды над одной или несколькими вкладками.</summary>
     internal sealed class TabCommandController {

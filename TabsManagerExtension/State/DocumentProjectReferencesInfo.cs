@@ -1,17 +1,11 @@
 ﻿using System;
 using System.Linq;
-using System.Text;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.ComponentModel;
-using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
-using Helpers.Attributes;
 
+using Helpers.Attributes;
 
 namespace TabsManagerExtension.State.Document {
     public partial class DocumentProjectReferencesInfo : Helpers.ObservableObject {

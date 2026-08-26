@@ -1,11 +1,10 @@
 ﻿using System;
-using System.Linq;
 using System.ComponentModel;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Helpers.Attributes;
 
+using Helpers.Attributes;
 
 namespace TabsManagerExtension.VsShell.Hierarchy {
     namespace _Details {

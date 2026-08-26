@@ -12,7 +12,6 @@ using Microsoft.VisualStudio.Shell;
 using Helpers.Ex;
 using TMEx = TabsManagerExtension;
 
-
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Строит меню project context и переоткрывает документы в выбранном проекте.</summary>
     internal sealed class ProjectContextController {

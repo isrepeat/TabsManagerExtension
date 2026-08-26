@@ -1,19 +1,4 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Runtime.InteropServices;
-using System.ComponentModel;
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Collections.Specialized;
-using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio.Shell.Interop;
-using TabsManagerExtension.VsShell.Project;
-
-
-namespace TabsManagerExtension.State.Document {
+﻿namespace TabsManagerExtension.State.Document {
     public abstract class TabItemBase : Helpers.Collections.SelectableItemBase {
 
         private string _caption;

@@ -1,12 +1,11 @@
 ﻿using System;
-using System.IO;
 using System.Linq;
 using System.Collections.Generic;
-using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio;
-using Helpers.Text.Ex;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 
+using Helpers.Text.Ex;
 
 namespace TabsManagerExtension.VsShell.Project {
     public sealed class ProjectSourcesAnalyzer {

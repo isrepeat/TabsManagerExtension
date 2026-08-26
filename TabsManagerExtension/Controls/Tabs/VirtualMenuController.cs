@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Collections.Generic;
@@ -7,7 +7,6 @@ using Microsoft.VisualStudio.Shell;
 
 using Helpers.Ex;
 using TMEx = TabsManagerExtension;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Синхронизирует виртуальное hover-меню с текущей вкладкой и project context.</summary>

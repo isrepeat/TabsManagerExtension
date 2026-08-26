@@ -1,18 +1,11 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
-using System.Windows;
-using System.Windows.Input;
 using System.Windows.Threading;
 using System.Collections.Generic;
 using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.OLE.Interop;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.TextManager.Interop;
-using Microsoft.VisualStudio.VCCodeModel;
-using Microsoft.VisualStudio.VCProjectEngine;
-
 
 namespace TabsManagerExtension.VsShell.Solution.Services {
     /// <summary>

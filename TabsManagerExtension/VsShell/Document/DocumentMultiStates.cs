@@ -1,14 +1,13 @@
 ﻿using System;
 using System.Linq;
 using System.ComponentModel;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Helpers.Attributes;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using TabsManagerExtension.VsShell.Hierarchy;
 
+using Helpers.Attributes;
 
 namespace TabsManagerExtension.VsShell.Document {
     public abstract class DocumentMultiStateElementBase :

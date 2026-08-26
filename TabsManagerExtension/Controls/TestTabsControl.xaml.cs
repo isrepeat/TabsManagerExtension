@@ -1,10 +1,7 @@
-﻿using System;
-using System.Windows;
-using System.Windows.Media;
+﻿using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
 using Microsoft.VisualStudio.Shell;
-using Task = System.Threading.Tasks.Task;
 
 namespace TabsManagerExtension.Controls {
     public partial class TestTabsControl : Helpers.BaseUserControl {

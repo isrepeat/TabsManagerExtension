@@ -1,11 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
-using System.Collections.Generic;
-using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Shell;
-using Microsoft.VisualStudio;
-
 
 namespace TabsManagerExtension.VsShell.Document {
     public enum IncludeKind {

@@ -1,11 +1,7 @@
 ﻿using System;
-using System.IO;
-using System.Linq;
-using System.Collections.Generic;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-
 
 namespace TabsManagerExtension.VsShell.Document {
     public class ShellDocument {

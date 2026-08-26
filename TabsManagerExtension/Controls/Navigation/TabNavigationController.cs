@@ -3,9 +3,9 @@ using System.Linq;
 using System.Windows.Input;
 using System.Windows.Threading;
 using System.Collections.Generic;
-using Helpers.Collections;
-using TabsManagerExtension.State.Document;
 
+using Helpers.Collections;
+using TMEx = TabsManagerExtension;
 
 namespace TabsManagerExtension.Controls.Navigation {
     // Определяет связь между выделением вкладок и активным VS-фреймом.
@@ -23,8 +23,8 @@ namespace TabsManagerExtension.Controls.Navigation {
 
 
     internal sealed class TabNavigationController {
-        private readonly GroupsSelectionCoordinator<TabItemsGroupBase, TabItemBase> _selectionCoordinator;
-        private readonly Func<IReadOnlyList<TabItemBase>> _itemsProvider;
+        private readonly GroupsSelectionCoordinator<TMEx.State.Document.TabItemsGroupBase, TMEx.State.Document.TabItemBase> _selectionCoordinator;
+        private readonly Func<IReadOnlyList<TMEx.State.Document.TabItemBase>> _itemsProvider;
         private readonly List<ITabNavigationExtension> _extensions = new();
         private int _activationSuppressionDepth;
 
@@ -46,9 +46,9 @@ namespace TabsManagerExtension.Controls.Navigation {
                     _selectionCoordinator.ShiftSelectionAnchorProvider = () => {
                         var activeFrameItem = this.Items.FirstOrDefault(item => item.Metadata?.GetFlag("IsFrameActive") == true);
                         if (activeFrameItem == null) {
-                            return SelectionAnchorResult<TabItemBase>.None;
+                            return SelectionAnchorResult<TMEx.State.Document.TabItemBase>.None;
                         }
-                        return SelectionAnchorResult<TabItemBase>.FromItem(activeFrameItem);
+                        return SelectionAnchorResult<TMEx.State.Document.TabItemBase>.FromItem(activeFrameItem);
                     };
                 }
                 else {
@@ -58,8 +58,8 @@ namespace TabsManagerExtension.Controls.Navigation {
         }
 
         public TabNavigationController(
-            GroupsSelectionCoordinator<TabItemsGroupBase, TabItemBase> selectionCoordinator,
-            Func<IReadOnlyList<TabItemBase>> itemsProvider
+            GroupsSelectionCoordinator<TMEx.State.Document.TabItemsGroupBase, TMEx.State.Document.TabItemBase> selectionCoordinator,
+            Func<IReadOnlyList<TMEx.State.Document.TabItemBase>> itemsProvider
             ) {
             _selectionCoordinator = selectionCoordinator;
             _itemsProvider = itemsProvider;
@@ -67,8 +67,8 @@ namespace TabsManagerExtension.Controls.Navigation {
             this.SelectionActivationPolicy = _selectionActivationPolicy;
         }
 
-        public TabItemBase? PrimaryItem => _selectionCoordinator.PrimarySelection?.Item;
-        public IReadOnlyList<TabItemBase> Items => _itemsProvider();
+        public TMEx.State.Document.TabItemBase? PrimaryItem => _selectionCoordinator.PrimarySelection?.Item;
+        public IReadOnlyList<TMEx.State.Document.TabItemBase> Items => _itemsProvider();
 
         public void AddExtension(ITabNavigationExtension extension) {
             _extensions.Add(extension);
@@ -78,7 +78,7 @@ namespace TabsManagerExtension.Controls.Navigation {
             return _extensions.Any(extension => extension.HandleKey(key, modifiers));
         }
 
-        public void OnPointerSelection(TabItemBase tabItem, ModifierKeys modifiers) {
+        public void OnPointerSelection(TMEx.State.Document.TabItemBase tabItem, ModifierKeys modifiers) {
             // Ctrl/Shift относятся к изменению набора выбранных вкладок. При политике
             // ActivateOnlyOnUnmodifiedPointerSelection они не должны менять открытый документ.
             bool hasSelectionModifier =
@@ -93,7 +93,7 @@ namespace TabsManagerExtension.Controls.Navigation {
             }
         }
 
-        public void ActivateLatestSelectionIfConfigured(TabItemBase tabItem) {
+        public void ActivateLatestSelectionIfConfigured(TMEx.State.Document.TabItemBase tabItem) {
             // Клавиатурная навигация вызывает этот метод после изменения selection,
             // чтобы не дублировать знание о выбранной политике в каждом extension.
             if (this.SelectionActivationPolicy == TabSelectionActivationPolicy.ActivateLatestSelectedItem) {
@@ -101,7 +101,7 @@ namespace TabsManagerExtension.Controls.Navigation {
             }
         }
 
-        public void SetSelectionWithoutActivation(TabItemBase tabItem, bool isSelected, ModifierKeys modifiers) {
+        public void SetSelectionWithoutActivation(TMEx.State.Document.TabItemBase tabItem, bool isSelected, ModifierKeys modifiers) {
             _activationSuppressionDepth++;
             try {
                 _selectionCoordinator.SetSelection(tabItem, isSelected, modifiers);
@@ -116,8 +116,8 @@ namespace TabsManagerExtension.Controls.Navigation {
             _ = Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => _activationSuppressionDepth--));
         }
 
-        public void Activate(TabItemBase? tabItem) {
-            if (tabItem is IActivatableTab activatableTab) {
+        public void Activate(TMEx.State.Document.TabItemBase? tabItem) {
+            if (tabItem is TMEx.State.Document.IActivatableTab activatableTab) {
                 activatableTab.Activate();
             }
         }

@@ -1,15 +1,8 @@
 ﻿using System;
-using System.IO;
-using System.Linq;
 using System.Collections.Generic;
-using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio;
-using Helpers.Text.Ex;
-using Microsoft.VisualStudio.Package;
-using TabsManagerExtension.VsShell.Document;
-using Task = System.Threading.Tasks.Task;
-
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 
 namespace TabsManagerExtension.VsShell.Project {
     public class ProjectHierarchyTracker :

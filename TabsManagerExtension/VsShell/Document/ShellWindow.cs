@@ -1,8 +1,5 @@
 ﻿using System;
-using System.IO;
-using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell;
-
 
 namespace TabsManagerExtension.VsShell.Document {
     public class ShellWindow {

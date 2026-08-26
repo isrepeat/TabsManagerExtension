@@ -1,7 +1,6 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 using System.Collections.Generic;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Применяет масштаб и ресурсы appearance к корневому control и его вкладкам.</summary>

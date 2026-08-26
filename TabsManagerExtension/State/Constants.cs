@@ -1,5 +1,4 @@
-﻿
-namespace TabsManagerExtension.State {
+﻿namespace TabsManagerExtension.State {
     public static class Constants {
         public static class UI {
             public const string PinTab = "Pin tab";

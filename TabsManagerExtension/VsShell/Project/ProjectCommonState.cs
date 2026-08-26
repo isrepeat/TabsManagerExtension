@@ -1,14 +1,12 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
+using System.Collections.Generic;
 using System.ComponentModel;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Helpers.Attributes;
-using System.Collections.Generic;
-using Helpers.Ex;
 
+using Helpers.Attributes;
 
 namespace TabsManagerExtension.VsShell.Project {
     namespace _Details {

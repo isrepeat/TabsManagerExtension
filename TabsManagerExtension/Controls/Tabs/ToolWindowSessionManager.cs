@@ -1,10 +1,9 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows.Threading;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Сохраняет и восстанавливает tool window, включая отложенную активацию frame.</summary>

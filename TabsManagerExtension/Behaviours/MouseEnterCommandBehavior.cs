@@ -1,6 +1,5 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Input;
-
 
 namespace TabsManagerExtension.Behaviours {
     public static class MouseEnterCommandBehavior {

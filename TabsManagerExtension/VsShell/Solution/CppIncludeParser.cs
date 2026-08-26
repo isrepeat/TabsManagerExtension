@@ -1,8 +1,7 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
-
 
 namespace TabsManagerExtension.VsShell.Solution.Services {
     /// <summary>

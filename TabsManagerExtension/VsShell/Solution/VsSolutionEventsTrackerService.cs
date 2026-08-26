@@ -1,17 +1,8 @@
 ﻿using System;
-using System.IO;
-using System.Windows;
-using System.Windows.Threading;
 using System.Collections.Generic;
-using System.ComponentModel.Composition;
 using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Utilities;
-using EnvDTE;
-
 
 namespace TabsManagerExtension.VsShell.Solution.Services {
     /// <summary>

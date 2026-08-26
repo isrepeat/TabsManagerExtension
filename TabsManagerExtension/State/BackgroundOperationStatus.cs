@@ -1,5 +1,4 @@
-using Helpers;
-
+﻿using Helpers;
 
 namespace TabsManagerExtension.State {
     public sealed class BackgroundOperationStatus : ObservableObject {

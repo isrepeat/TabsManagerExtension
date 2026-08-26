@@ -1,24 +1,16 @@
 ﻿using System;
-using System.IO;
-using System.Windows;
-using System.Collections.Generic;
-using System.ComponentModel.Composition;
 using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Utilities;
-using TabsManagerExtension.Services;
-using TabsManagerExtension.VsShell.Solution.Services;
 
+using TMEx = TabsManagerExtension;
 
 namespace TabsManagerExtension.VsShell.Services {
     public abstract class VsSelectionEventsServiceBase<TService> :
-        TabsManagerExtension.Services.SingletonServiceBase<TService>,
+        TMEx.Services.SingletonServiceBase<TService>,
         IVsSelectionEvents,
         IDisposable
-        where TService : VsSelectionEventsServiceBase<TService>, IExtensionService, new() {
+        where TService : VsSelectionEventsServiceBase<TService>, TMEx.Services.IExtensionService, new() {
 
         private uint _selectionEventsCookie;
         
@@ -29,7 +21,7 @@ namespace TabsManagerExtension.VsShell.Services {
 
             // Подписываем этот класс (реализует IVsSelectionEvents) на события Visual Studio,
             // чтобы получать уведомления о смене selection.
-            int hr = PackageServices.VsMonitorSelection.AdviseSelectionEvents(this, out _selectionEventsCookie);
+            int hr = TMEx.PackageServices.VsMonitorSelection.AdviseSelectionEvents(this, out _selectionEventsCookie);
             ErrorHandler.ThrowOnFailure(hr);
         }
 
@@ -41,7 +33,7 @@ namespace TabsManagerExtension.VsShell.Services {
             }
 
             if (_selectionEventsCookie != 0) {
-                PackageServices.VsMonitorSelection.UnadviseSelectionEvents(_selectionEventsCookie);
+                TMEx.PackageServices.VsMonitorSelection.UnadviseSelectionEvents(_selectionEventsCookie);
                 _selectionEventsCookie = 0;
             }
 

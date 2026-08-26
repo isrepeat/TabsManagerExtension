@@ -1,17 +1,8 @@
 ﻿using System;
-using System.IO;
-using System.Windows;
 using System.Collections.Generic;
-using System.ComponentModel.Composition;
 using Microsoft.VisualStudio;
-using Microsoft.VisualStudio.Text;
-using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Microsoft.VisualStudio.Utilities;
-using System.Windows.Threading;
-using TabsManagerExtension;
-
 
 namespace TabsManagerExtension.VsShell.Services {
     public sealed class VsIDEStateFlagsTrackerService :

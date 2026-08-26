@@ -1,6 +1,5 @@
-using System;
+﻿using System;
 using Microsoft.VisualStudio.Shell.Interop;
-
 
 namespace TabsManagerExtension.Controls.Tabs {
     /// <summary>Адаптирует DTE и VS tracker events к событиям подсистемы вкладок.</summary>

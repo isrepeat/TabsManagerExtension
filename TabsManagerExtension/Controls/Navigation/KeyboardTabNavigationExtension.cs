@@ -1,17 +1,17 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows.Input;
-using TabsManagerExtension.State.Document;
 
+using TMEx = TabsManagerExtension;
 
 namespace TabsManagerExtension.Controls.Navigation {
     internal sealed class KeyboardTabNavigationExtension : ITabNavigationExtension {
         private readonly TabNavigationController _navigationController;
 
-        public event Action<TabItemBase?>? FocusedItemChanged;
+        public event Action<TMEx.State.Document.TabItemBase?>? FocusedItemChanged;
         public event Action? InputTargetRestoreRequested;
 
-        public TabItemBase? FocusedItem { get; private set; }
+        public TMEx.State.Document.TabItemBase? FocusedItem { get; private set; }
 
         public KeyboardTabNavigationExtension(TabNavigationController navigationController) {
             _navigationController = navigationController;
@@ -22,7 +22,7 @@ namespace TabsManagerExtension.Controls.Navigation {
             this.InputTargetRestoreRequested?.Invoke();
         }
 
-        public void FocusItem(TabItemBase tabItem) {
+        public void FocusItem(TMEx.State.Document.TabItemBase tabItem) {
             this.SetFocusedItem(tabItem);
         }
 
@@ -86,7 +86,7 @@ namespace TabsManagerExtension.Controls.Navigation {
             return true;
         }
 
-        private void SetFocusedItem(TabItemBase? tabItem) {
+        private void SetFocusedItem(TMEx.State.Document.TabItemBase? tabItem) {
             if (!ReferenceEquals(this.FocusedItem, tabItem)) {
                 this.FocusedItem = tabItem;
                 this.FocusedItemChanged?.Invoke(tabItem);
