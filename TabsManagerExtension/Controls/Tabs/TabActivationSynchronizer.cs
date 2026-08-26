@@ -94,7 +94,7 @@ namespace TabsManagerExtension.Controls.Tabs {
             }
             else {
                 Helpers.GlobalFlags.SetFlag("TextEditorFrameFocused", false);
-                _overlayController.Hide();
+                _overlayController.DeactivateEditorFrame();
             }
         }
 
@@ -152,7 +152,7 @@ namespace TabsManagerExtension.Controls.Tabs {
                 }
             }
 
-            _overlayController.Hide();
+            _overlayController.DeactivateEditorFrame();
         }
 
         public void ActivatePrimaryTab() {

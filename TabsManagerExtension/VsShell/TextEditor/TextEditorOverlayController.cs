@@ -48,6 +48,11 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
             this.EnsureCreated();
 
             if (_overlayManager?.Overlay != null) {
+                _overlayManager.Overlay.OnEditorFrameActivityChanged(
+                    isActive: true,
+                    keepFindCommandsWhenInactive: false
+                );
+
                 _overlayManager.Overlay.Visibility = Visibility.Visible;
             }
         }
@@ -56,8 +61,22 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             if (_overlayManager?.Overlay != null) {
+                _overlayManager.Overlay.OnEditorFrameActivityChanged(
+                    isActive: false,
+                    keepFindCommandsWhenInactive: false
+                );
+
                 _overlayManager.Overlay.Visibility = Visibility.Collapsed;
             }
+        }
+
+        public void DeactivateEditorFrame() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            // При переходе фокуса в tool window оставляем доступными команды открытой Quick Find.
+            _overlayManager?.Overlay?.OnEditorFrameActivityChanged(
+                isActive: false,
+                keepFindCommandsWhenInactive: true
+            );
         }
 
         public void Dispose() {
@@ -88,6 +107,11 @@ namespace TabsManagerExtension.VsShell.TextEditor.Overlay {
             _activeDocumentFullName = _dte2.ActiveDocument?.FullName;
             this.EnsureAttached(overlayTarget);
             if (_overlay != null) {
+                _overlay.OnEditorFrameActivityChanged(
+                    isActive: true,
+                    keepFindCommandsWhenInactive: false
+                );
+
                 _overlay.Visibility = Visibility.Visible;
             }
 

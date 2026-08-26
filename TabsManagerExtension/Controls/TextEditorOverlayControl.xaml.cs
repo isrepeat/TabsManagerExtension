@@ -10,6 +10,7 @@ using System.Windows.Shapes;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Navigation;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -48,10 +49,13 @@ namespace TabsManagerExtension.Controls {
         private State.TextEditor.AnchorPoint? _selectedAnchor;
         private ITextSnapshot? _activeSnapshot;
         private IWpfTextView? _activeTextView;
+        private IAdornmentLayer? _findAdornmentLayer;
         private ITextBuffer? _loadedTextBuffer;
         private int _loadedSnapshotVersion = -1;
         private bool _isAnchorListExpanded;
         private bool _isSynchronizingCaretSelection;
+        private bool _isEditorFrameActive = true;
+        private bool _keepFindCommandsWhenEditorInactive;
         private readonly Dictionary<ITextBuffer, AnchorSnapshotCache> _anchorCache = new();
 
         private sealed class AnchorSnapshotCache {
@@ -86,6 +90,9 @@ namespace TabsManagerExtension.Controls {
         }
 
         public ICommand OnToggleAnchorListCommand { get; }
+        public ICommand OnFindNextCommand { get; }
+        public ICommand OnFindPreviousCommand { get; }
+        public ICommand OnFindInSolutionCommand { get; }
 
         public TextEditorOverlayControl() {
             this.InitializeComponent();
@@ -95,6 +102,9 @@ namespace TabsManagerExtension.Controls {
             this.DataContext = this;
 
             this.OnToggleAnchorListCommand = new Helpers.RelayCommand<object>(this.OnToggleAnchorList);
+            this.OnFindNextCommand = new Helpers.RelayCommand(this.FindNext);
+            this.OnFindPreviousCommand = new Helpers.RelayCommand(this.FindPrevious);
+            this.OnFindInSolutionCommand = new Helpers.RelayCommand(this.FindInSolution);
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e) {
@@ -104,6 +114,8 @@ namespace TabsManagerExtension.Controls {
             // поэтому значения из XAML не применяются гарантированно — устанавливаем явно в OnLoaded.
             this.IsHitTestVisible = true;
             this.UpdateAnchorListMaxHeight();
+            this.SubscribeToFindAdornmentChanges();
+            this.UpdateAnchorContainerVisibility();
             Settings.TabsManagerSettingsService.AnchorPatternsChanged += this.OnAnchorPatternsChanged;
 
         }
@@ -120,6 +132,7 @@ namespace TabsManagerExtension.Controls {
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
             Settings.TabsManagerSettingsService.AnchorPatternsChanged -= this.OnAnchorPatternsChanged;
+            this.UnsubscribeFromFindAdornmentChanges();
             //VsShell.TextEditor.Services.TextEditorCommandFilterService.Instance.RemoveTrackedInputElement(this);
             // Контрол временно выгружается при переносе adorner между document frame.
             // Не очищаем состояние и кэш: новый snapshot будет применён сразу после повторного подключения.
@@ -193,8 +206,17 @@ namespace TabsManagerExtension.Controls {
 
             _isAnchorListExpanded = false;
             this.UnsubscribeFromCaret();
+            this.UnsubscribeFromFindAdornmentChanges();
             _activeTextView = null;
+            _findAdornmentLayer = null;
             this.ResetLoadedAnchors(showToggleButton: false);
+        }
+
+        public void OnEditorFrameActivityChanged(bool isActive, bool keepFindCommandsWhenInactive) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            _isEditorFrameActive = isActive;
+            _keepFindCommandsWhenEditorInactive = keepFindCommandsWhenInactive;
+            this.UpdateAnchorContainerVisibility();
         }
 
         public void LoadAnchorsFromActiveDocument() {
@@ -273,12 +295,209 @@ namespace TabsManagerExtension.Controls {
 
         private void SetActiveTextView(IWpfTextView textView) {
             if (ReferenceEquals(_activeTextView, textView)) {
+                this.SubscribeToFindAdornmentChanges();
+                this.UpdateAnchorContainerVisibility();
                 return;
             }
 
             this.UnsubscribeFromCaret();
+            this.UnsubscribeFromFindAdornmentChanges();
             _activeTextView = textView;
+            _findAdornmentLayer = textView.GetAdornmentLayer("FindUIAdornmentLayer");
+            this.SubscribeToFindAdornmentChanges();
+            this.UpdateAnchorContainerVisibility();
             this.SubscribeToCaret();
+        }
+
+        private void SubscribeToFindAdornmentChanges() {
+            if (_activeTextView == null || !this.IsLoaded) {
+                return;
+            }
+
+            _activeTextView.VisualElement.LayoutUpdated -= this.OnTextViewLayoutUpdated;
+            _activeTextView.VisualElement.LayoutUpdated += this.OnTextViewLayoutUpdated;
+        }
+
+        private void UnsubscribeFromFindAdornmentChanges() {
+            if (_activeTextView != null) {
+                _activeTextView.VisualElement.LayoutUpdated -= this.OnTextViewLayoutUpdated;
+            }
+        }
+
+        private void OnTextViewLayoutUpdated(object sender, EventArgs e) {
+            this.UpdateAnchorContainerVisibility();
+        }
+
+        private void UpdateAnchorContainerVisibility() {
+            // Штатная Quick Find занимает тот же верхний правый угол, поэтому якоря и команды не показываются одновременно.
+            bool isFindVisible = _findAdornmentLayer?.IsEmpty == false;
+            bool showFindCommands = isFindVisible &&
+                (_isEditorFrameActive || _keepFindCommandsWhenEditorInactive);
+            this.Visibility = _isEditorFrameActive || showFindCommands
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            this.AnchorContainer.Visibility = _isEditorFrameActive && !isFindVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            this.FindCommandsContainer.Visibility = showFindCommands
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+            if (showFindCommands) {
+                this.UpdateFindCommandsPosition();
+            }
+        }
+
+        private void UpdateFindCommandsPosition() {
+            const double fallbackTop = 135;
+            const double verticalGap = 4;
+            double? top = null;
+
+            if (_findAdornmentLayer != null) {
+                foreach (var element in _findAdornmentLayer.Elements) {
+                    var adornment = element.Adornment as FrameworkElement;
+                    if (adornment?.IsVisible != true || adornment.ActualHeight <= 0) {
+                        continue;
+                    }
+
+                    try {
+                        var topLeft = adornment.TranslatePoint(new Point(0, 0), this);
+                        top = Math.Max(verticalGap, topLeft.Y + adornment.ActualHeight + verticalGap);
+                        break;
+                    }
+                    catch (InvalidOperationException) {
+                        // В разных версиях VS Find UI может находиться в отдельной visual-ветке.
+                    }
+                }
+            }
+
+            var margin = new Thickness(0, top ?? fallbackTop, 30, 0);
+            if (this.FindCommandsContainer.Margin != margin) {
+                this.FindCommandsContainer.Margin = margin;
+            }
+        }
+
+        private void FindNext() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            PackageServices.Dte2.ExecuteCommand("Edit.FindNext");
+        }
+
+        private void FindPrevious() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            PackageServices.Dte2.ExecuteCommand("Edit.FindPrevious");
+        }
+
+        private void FindInSolution() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // Запускаем поиск через уже открытую Quick Find: так VS использует современное окно результатов, а не legacy Find Results 1.
+            if (!this.TryGetSolutionSearchScope(out var scope, out var findManager)) {
+                Helpers.Diagnostic.Logger.LogWarning("[TextEditorOverlay] Quick Find solution scope was not found.");
+                return;
+            }
+
+            findManager.GetType().GetProperty("CurrentScope")?.SetValue(findManager, scope);
+
+            var searchScopeInterface = scope.GetType().GetInterfaces()
+                .First(type => type.FullName == "Microsoft.VisualStudio.Find.ISearchScope");
+            var findAllMethod = searchScopeInterface.GetMethod("DoFindAllAsync");
+            if (findAllMethod?.Invoke(scope, new object[] { CancellationToken.None }) is Task findTask) {
+                _ = findTask.ContinueWith(
+                    task => Helpers.Diagnostic.Logger.LogError($"[TextEditorOverlay] Find in solution failed: {task.Exception}"),
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted,
+                    TaskScheduler.Default
+                );
+            }
+        }
+
+        private bool TryGetSolutionSearchScope(out object scope, out object findManager) {
+            scope = null!;
+            findManager = null!;
+
+            if (_findAdornmentLayer == null) {
+                return false;
+            }
+
+            foreach (var element in _findAdornmentLayer.Elements) {
+                // Типы Quick Find не входят в публичный API, поэтому извлекаем менеджер из visual-дерева без жёсткой зависимости от версии VS.
+                var candidateManager = TryGetQuickFindManager(element.Adornment);
+                if (candidateManager?.GetType().GetProperty("ScopesCollection")?.GetValue(candidateManager) is not System.Collections.IEnumerable scopes) {
+                    continue;
+                }
+
+                foreach (var item in scopes) {
+                    var candidateScope = item == null ? null : TryUnwrapSearchScope(item);
+                    if (candidateScope == null || !IsSolutionSearchScope(candidateScope)) {
+                        continue;
+                    }
+
+                    scope = candidateScope;
+                    findManager = candidateManager;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static object? TryGetQuickFindManager(UIElement findAdornment) {
+            if (findAdornment is FrameworkElement frameworkElement && IsQuickFindManager(frameworkElement.DataContext)) {
+                return frameworkElement.DataContext;
+            }
+
+            var adornmentType = findAdornment.GetType();
+            foreach (var property in adornmentType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)) {
+                if (property.GetIndexParameters().Length != 0 || property.PropertyType.Name.IndexOf("QuickFindManager", StringComparison.Ordinal) < 0) {
+                    continue;
+                }
+
+                try {
+                    var value = property.GetValue(findAdornment);
+                    if (IsQuickFindManager(value)) {
+                        return value;
+                    }
+                }
+                catch (System.Reflection.TargetInvocationException) {
+                }
+            }
+
+            foreach (var field in adornmentType.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)) {
+                var value = field.GetValue(findAdornment);
+                if (IsQuickFindManager(value)) {
+                    return value;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsQuickFindManager(object? value) {
+            return value?.GetType().Name.IndexOf("QuickFindManager", StringComparison.Ordinal) >= 0;
+        }
+
+        private static object? TryUnwrapSearchScope(object item) {
+            object? current = item;
+            for (int depth = 0; depth < 3 && current != null; depth++) {
+                if (current.GetType().GetInterfaces().Any(type => type.FullName == "Microsoft.VisualStudio.Find.ISearchScope")) {
+                    return current;
+                }
+
+                current = current.GetType().GetProperty("Item")?.GetValue(current);
+            }
+
+            return null;
+        }
+
+        private static bool IsSolutionSearchScope(object scope) {
+            if (scope.GetType().Name.IndexOf("SolutionScope", StringComparison.Ordinal) >= 0) {
+                return true;
+            }
+
+            var searchScopeInterface = scope.GetType().GetInterfaces()
+                .First(type => type.FullName == "Microsoft.VisualStudio.Find.ISearchScope");
+            string? displayName = searchScopeInterface.GetProperty("DisplayName")?.GetValue(scope) as string;
+            return string.Equals(displayName, "Entire solution", StringComparison.OrdinalIgnoreCase);
         }
 
         private void SubscribeToCaret() {

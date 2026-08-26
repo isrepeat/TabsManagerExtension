@@ -86,6 +86,42 @@
                 </Setter>
             </Style>
 
+            <!-- Команды Quick Find выглядят частью штатной панели и получают фон только при наведении. -->
+            <Style x:Key="FindCommandButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="32"/>
+                <Setter Property="Height" Value="28"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Margin" Value="0,0,2,0"/>
+                <Setter Property="FontFamily" Value="Segoe UI Symbol"/>
+                <Setter Property="FontSize" Value="16"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="#999999"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Focusable" Value="False"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource AppIsMouseOverBrush}"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Background" Value="#505050"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
 
 
             <Style x:Key="AnchorListBoxStyle" TargetType="ListBox">
@@ -140,7 +176,34 @@
 
 
     <Grid>
-        <Grid Style="{StaticResource AnchorContainerStyle}">
+        <!-- Панель показывается только пока открыта штатная Quick Find. -->
+        <Border x:Name="FindCommandsContainer"
+                Margin="0,0,30,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                BorderThickness="0"
+                Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal">
+                <Button Style="{StaticResource FindCommandButtonStyle}"
+                        Command="{Binding OnFindNextCommand}"
+                        Content="↓"
+                        ToolTip="Find next (F3)" />
+                <Button Style="{StaticResource FindCommandButtonStyle}"
+                        Command="{Binding OnFindPreviousCommand}"
+                        Content="↑"
+                        ToolTip="Find previous (Shift+F3)" />
+                <Button Style="{StaticResource FindCommandButtonStyle}"
+                        Command="{Binding OnFindInSolutionCommand}"
+                        FontSize="13"
+                        Margin="0"
+                        Content="⌕S"
+                        ToolTip="Find in solution" />
+            </StackPanel>
+        </Border>
+
+        <Grid x:Name="AnchorContainer"
+              Style="{StaticResource AnchorContainerStyle}">
             <Border BorderThickness="1"
                     BorderBrush="#00ffffff"
                     >
