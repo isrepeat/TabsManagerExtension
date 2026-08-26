@@ -42,7 +42,7 @@ digraph ProjectArchitecture {
     includes [label="Анализ зависимостей #include\nparser + MSBuild + resolver + graph", fillcolor="#51421f", URL="\ref include_dependency_architecture"];
     domain [label="Project / Document / Hierarchy\nmulti-state domain model", fillcolor="#3a3555", URL="\ref TabsManagerExtension.VsShell.Document.Document"];
     editor [label="Интеграция с text editor\ncommand filters + overlay", fillcolor="#4a3042", URL="\ref TabsManagerExtension.VsShell.TextEditor.Services.TextEditorFileNavigationCommandFilterService"];
-    ui [label="Tabs Manager UI\nToolWindow + WPF controls + tab state", fillcolor="#4a3042", URL="\ref TabsManagerExtension.Controls.TabsManagerToolWindowControl"];
+    ui [label="Tabs Manager UI\nToolWindow + WPF controls + tab state", fillcolor="#4a3042", URL="\ref tabs_manager_ui_architecture"];
     helpers [label="UtilityHelpersLib / HelpersCs\nevents + multi-state + WPF + logging", fillcolor="#343a46", URL="\ref Helpers.ObservableObject"];
 
     host -> lifecycle [label="Initialize / Shutdown"];
@@ -74,6 +74,7 @@ digraph ProjectArchitecture {
 
 - @subpage include_dependency_architecture "Построение и обновление графа #include"
 - @subpage service_lifecycle "Жизненный цикл глобальных сервисов"
+- @subpage tabs_manager_ui_architecture "Архитектура Tabs Manager UI и модели вкладок"
 - Страницы Classes, Namespaces и Files в боковом меню строятся автоматически из исходного кода.
 - Caller/callee graphs включаются точечно командами `@callgraph` и `@callergraph`: глобальный
   анализ всего C#-дерева очень медленный и без Roslyn остаётся эвристическим.

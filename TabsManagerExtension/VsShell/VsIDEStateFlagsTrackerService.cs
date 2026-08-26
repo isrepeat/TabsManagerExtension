@@ -21,8 +21,6 @@ namespace TabsManagerExtension.VsShell.Services {
         public static readonly Guid SolutionExistsGuid = new Guid(UIContextGuids80.SolutionExists);
 
         public readonly Helpers.Events.Action<Guid, bool> IDEStateFlagsChanged = new();
-        public readonly Helpers.Events.Action<string> SolutionLoaded = new();
-        public readonly Helpers.Events.Action<string> SolutionClosed = new();
 
         private readonly Dictionary<Guid, bool> _contextStateMap = new();
         private readonly Dictionary<uint, Guid> _contextCookiesMap = new();
@@ -91,41 +89,13 @@ namespace TabsManagerExtension.VsShell.Services {
             return _contextStateMap.TryGetValue(contextGuid, out bool isActive) && isActive;
         }
 
-        public void InvokeIfSolutionLoaded(System.Action<string> handler) {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            if (this.IsContextActive(SolutionExistsGuid)) {
-                handler(this.GetCurrentSolutionName() ?? string.Empty);
-            }
-        }
-
         //
         // Internal logic
         //
         private void HandleContextState(Guid contextGuid, bool isActive) {
             _contextStateMap[contextGuid] = isActive;
 
-            if (contextGuid == SolutionExistsGuid) {
-                string? solutionName = this.GetCurrentSolutionName();
-
-                if (isActive) {
-                    this.SolutionLoaded.Invoke(solutionName ?? string.Empty);
-                }
-                else {
-                    this.SolutionClosed.Invoke(solutionName ?? string.Empty);
-                }
-            }
-            else {
-                this.IDEStateFlagsChanged.Invoke(contextGuid, isActive);
-            }
-        }
-
-        private string? GetCurrentSolutionName() {
-            ThreadHelper.ThrowIfNotOnUIThread();
-
-            
-            var dte2 = PackageServices.TryGetDte2();
-            return dte2?.Solution?.FileName;
+            this.IDEStateFlagsChanged.Invoke(contextGuid, isActive);
         }
     }
 }

@@ -34,9 +34,7 @@ digraph ServiceDependencies {
     manager -> input [style=dashed];
     manager -> navigation [style=dashed];
 
-    solution_model -> ide [label="depends on"];
     solution_model -> solution_events [label="depends on"];
-    includes -> ide [label="depends on"];
     includes -> solution_events [label="depends on"];
     includes -> solution_model [label="depends on"];
     input -> docs [label="depends on"];

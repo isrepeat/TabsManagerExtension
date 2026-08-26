@@ -15,7 +15,7 @@ using EnvDTE;
 
 namespace TabsManagerExtension.VsShell.Solution.Services {
     /// <summary>
-    /// Сервис отслеживания загрузки и выгрузки проектов через IVsSolutionEvents.
+    /// Единый сервис отслеживания жизненного цикла solution и его проектов через IVsSolutionEvents.
     /// </summary>
     public sealed class VsSolutionEventsTrackerService :
         TabsManagerExtension.Services.SingletonServiceBase<VsSolutionEventsTrackerService>,
@@ -23,12 +23,18 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         IVsSolutionEvents,
         IVsSolutionLoadEvents {
 
+        public readonly Helpers.Events.Action<string> SolutionLoaded = new();
+        public readonly Helpers.Events.Action SolutionClosing = new();
+        public readonly Helpers.Events.Action<string> SolutionClosed = new();
         public event Action<_EventArgs.ProjectHierarchyChangedEventArgs>? ProjectLoaded;
         public event Action<_EventArgs.ProjectHierarchyChangedEventArgs>? ProjectUnloaded;
         public event Action? BackgroundSolutionLoadCompleted;
         public event Action? SolutionHierarchyActivity;
 
         public bool IsBackgroundSolutionLoadCompleted { get; private set; }
+        public bool IsSolutionOpen { get; private set; }
+        public bool IsSolutionClosing { get; private set; }
+        public string? CurrentSolutionName { get; private set; }
 
         private IVsSolution? _vsSolution;
         private uint _cookie;
@@ -56,6 +62,13 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             if (_vsSolution is IVsSolution8 solution8) {
                 Guid eventsGuid = typeof(IVsSolutionLoadEvents).GUID;
                 ErrorHandler.ThrowOnFailure(solution8.AdviseSolutionEventsEx(ref eventsGuid, this, out _solutionLoadCookie));
+            }
+
+            // Сервис может инициализироваться после открытия solution, когда OnAfterOpenSolution
+            // уже прошёл. Снимаем начальное состояние явно, чтобы поздние подписчики получили его.
+            var dte = PackageServices.TryGetDte2();
+            if (dte?.Solution?.IsOpen == true) {
+                this.SetSolutionOpened(dte.Solution.FullName);
             }
 
             Helpers.Diagnostic.Logger.LogDebug("[VsSolutionEventsTrackerService] Initialized.");
@@ -167,6 +180,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         }
 
         public int OnAfterOpenSolution(object pUnkReserved, int fNewSolution) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            this.SetSolutionOpened(PackageServices.TryGetDte2()?.Solution?.FullName);
             return VSConstants.S_OK;
         }
 
@@ -175,11 +190,24 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         }
 
         public int OnBeforeCloseSolution(object pUnkReserved) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            // OnQueryCloseSolution ещё может отменить операцию. Публикуем Closing только
+            // после того, как VS перешла к фактическому закрытию solution.
+            this.IsSolutionClosing = true;
+            this.SolutionClosing.Invoke();
             return VSConstants.S_OK;
         }
 
         public int OnAfterCloseSolution(object pUnkReserved) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            string solutionName = this.CurrentSolutionName ?? string.Empty;
             this.IsBackgroundSolutionLoadCompleted = false;
+            this.IsSolutionClosing = false;
+            this.IsSolutionOpen = false;
+            this.CurrentSolutionName = null;
+            this.SolutionClosed.Invoke(solutionName);
             return VSConstants.S_OK;
         }
 
@@ -215,6 +243,13 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             Helpers.Diagnostic.Logger.LogDebug("[VsSolutionEventsTrackerService] Background solution load completed.");
             this.BackgroundSolutionLoadCompleted?.Invoke();
             return VSConstants.S_OK;
+        }
+
+        private void SetSolutionOpened(string? solutionName) {
+            this.CurrentSolutionName = solutionName;
+            this.IsSolutionOpen = true;
+            this.IsSolutionClosing = false;
+            this.SolutionLoaded.Invoke(solutionName ?? string.Empty);
         }
     }
 }

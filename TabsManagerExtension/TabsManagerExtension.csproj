@@ -155,6 +155,22 @@
     <Compile Include="Controls\TabsManagerToolWindowControl.xaml.cs">
       <DependentUpon>TabsManagerToolWindowControl.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Controls\Tabs\ClosedTabsHistory.cs" />
+    <Compile Include="Controls\Tabs\ClosedTabsRestorer.cs" />
+    <Compile Include="Controls\Tabs\ProjectContextController.cs" />
+    <Compile Include="Controls\Tabs\SolutionFileChangeMonitor.cs" />
+    <Compile Include="Controls\Tabs\TabActivationSynchronizer.cs" />
+    <Compile Include="Controls\Tabs\TabAppearanceManager.cs" />
+    <Compile Include="Controls\Tabs\TabCollectionManager.cs" />
+    <Compile Include="Controls\Tabs\TabCommandController.cs" />
+    <Compile Include="Controls\Tabs\TabInputController.cs" />
+    <Compile Include="Controls\Tabs\TabMenuItemFactory.cs" />
+    <Compile Include="Controls\Tabs\TabRenameService.cs" />
+    <Compile Include="Controls\Tabs\TabsStateReconciler.cs" />
+    <Compile Include="Controls\Tabs\TabsWorkspaceSynchronizer.cs" />
+    <Compile Include="Controls\Tabs\ToolWindowSessionManager.cs" />
+    <Compile Include="Controls\Tabs\VisualStudioTabEventBridge.cs" />
+    <Compile Include="Controls\Tabs\VirtualMenuController.cs" />
     <Compile Include="Controls\Navigation\TabNavigationController.cs" />
     <Compile Include="Controls\Navigation\KeyboardTabNavigationExtension.cs" />
     <Compile Include="Controls\ScaleSelectorControl.xaml.cs">

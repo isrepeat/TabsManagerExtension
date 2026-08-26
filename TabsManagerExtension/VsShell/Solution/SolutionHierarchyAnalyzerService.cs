@@ -200,7 +200,6 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         //
         public IReadOnlyList<Type> DependsOn() {
             return new[] {
-                typeof(VsShell.Services.VsIDEStateFlagsTrackerService),
                 typeof(VsShell.Solution.Services.VsSolutionEventsTrackerService),
             };
         }
@@ -209,11 +208,11 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         public void Initialize() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.InvokeIfSolutionLoaded(this.OnSolutionLoaded);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
 
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
 
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded += this.OnProjectLoaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded += this.OnProjectUnloaded;
@@ -240,8 +239,8 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             //_delayedFileChangeTimer.Stop();
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectUnloaded -= this.OnProjectUnloaded;
             VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.ProjectLoaded -= this.OnProjectLoaded;
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Remove(this.OnSolutionClosed);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Remove(this.OnSolutionLoaded);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionClosed.Remove(this.OnSolutionClosed);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionLoaded.Remove(this.OnSolutionLoaded);
 
             ClearInstance();
             Helpers.Diagnostic.Logger.LogDebug("[ExternalDependenciesGraphService] Disposed.");

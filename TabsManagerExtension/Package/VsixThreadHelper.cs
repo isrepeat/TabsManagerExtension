@@ -71,19 +71,31 @@ namespace TabsManagerExtension {
             Action action,
             DispatcherPriority priority = DispatcherPriority.Background) {
 
+            // Dispatcher может завершиться после проверки вызывающего кода, например во время
+            // shutdown Visual Studio. В этом случае постановка fire-and-forget задачи больше
+            // не имеет смысла и не должна превращаться в необработанное исключение.
+            if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) {
+                return;
+            }
+
 #pragma warning disable VSTHRD001 // Намеренно используем очередь WPF Dispatcher с заданным приоритетом.
-            _ = dispatcher.BeginInvoke(
-                new Action(() => {
-                    try {
-                        action();
-                    }
-                    catch (Exception ex) {
-                        Helpers.Diagnostic.Logger.LogError($"[RunOnUiThread] action exception: {ex}");
-                        System.Diagnostics.Debugger.Break();
-                    }
-                }),
-                priority
-            );
+            try {
+                _ = dispatcher.BeginInvoke(
+                    new Action(() => {
+                        try {
+                            action();
+                        }
+                        catch (Exception ex) {
+                            Helpers.Diagnostic.Logger.LogError($"[RunOnUiThread] action exception: {ex}");
+                            System.Diagnostics.Debugger.Break();
+                        }
+                    }),
+                    priority
+                );
+            }
+            catch (InvalidOperationException) {
+                // Dispatcher завершился между проверкой и постановкой действия в очередь.
+            }
 #pragma warning restore VSTHRD001
         }
 

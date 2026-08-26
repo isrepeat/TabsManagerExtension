@@ -224,11 +224,11 @@ namespace TabsManagerExtension {
 
 
         private void InitializeEvents() {
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionLoaded.Add(this.OnSolutionLoaded);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionLoaded.InvokeForLastHandlerIfTriggered();
 
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
-            VsShell.Services.VsIDEStateFlagsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionClosed.Add(this.OnSolutionClosed);
+            VsShell.Solution.Services.VsSolutionEventsTrackerService.Instance.SolutionClosed.InvokeForLastHandlerIfTriggered();
         }
 
 

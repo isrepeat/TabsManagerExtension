@@ -1,0 +1,166 @@
+/**
+@page tabs_manager_ui_architecture Архитектура Tabs Manager UI
+
+@tableofcontents
+
+@section tabs_ui_overview Назначение и границы
+
+@ref TabsManagerExtension.Controls.TabsManagerToolWindowControl служит composition root
+для WPF-панели вкладок. Он владеет bindable-свойствами и командами,
+связывает жизненный цикл WPF с событиями Visual Studio и создаёт контроллеры
+подсистемы. Изменение коллекций, синхронизация с VS, команды вкладок,
+ввод и меню вынесены в `Controls/Tabs`.
+
+@section tabs_ui_components Карта компонентов
+
+@dot
+digraph TabsManagerUiComponents {
+    graph [rankdir=TB, newrank=true, bgcolor="#1b1f26", pad=0.2, nodesep=0.4, ranksep=0.55, fontname="Segoe UI", fontcolor="#f1f5f9", label="Tabs Manager UI: границы ответственности", labelloc=t];
+    node [shape=box, style="rounded,filled", fillcolor="#273142", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", fontsize=9, margin="0.13,0.08"];
+    edge [color="#8aa4c2", fontcolor="#d9e2ec", fontname="Segoe UI", fontsize=8, arrowsize=0.7];
+
+    control [label="TabsManagerToolWindowControl\nWPF lifecycle + binding + composition", fillcolor="#4a3042", URL="\ref TabsManagerExtension.Controls.TabsManagerToolWindowControl"];
+    bridge [label="VisualStudioTabEventBridge\ndocument / window events", fillcolor="#24473f", URL="\ref TabsManagerExtension.Controls.Tabs.VisualStudioTabEventBridge"];
+    lifecycle [label="VsSolutionEventsTrackerService\nglobal solution lifecycle", fillcolor="#24473f", URL="\ref TabsManagerExtension.VsShell.Solution.Services.VsSolutionEventsTrackerService"];
+    files [label="SolutionFileChangeMonitor\nfile-system events", fillcolor="#24473f", URL="\ref TabsManagerExtension.Controls.Tabs.SolutionFileChangeMonitor"];
+
+    workspace [label="TabsWorkspaceSynchronizer\nsolution/document/window lifecycle", fillcolor="#3a3555", URL="\ref TabsManagerExtension.Controls.Tabs.TabsWorkspaceSynchronizer"];
+    activation [label="TabActivationSynchronizer\nactive frame + selection + overlay", fillcolor="#3a3555", URL="\ref TabsManagerExtension.Controls.Tabs.TabActivationSynchronizer"];
+    state [label="TabsStateReconciler\nperiodic reconciliation", fillcolor="#3a3555", URL="\ref TabsManagerExtension.Controls.Tabs.TabsStateReconciler"];
+
+    collection [label="TabCollectionManager\ngroups + lookup + mutations", fillcolor="#51421f", URL="\ref TabsManagerExtension.Controls.Tabs.TabCollectionManager"];
+    selection [label="Selection + navigation\ncoordinator / keyboard extension", fillcolor="#51421f", URL="\ref TabsManagerExtension.Controls.Navigation.TabNavigationController"];
+
+    commands [label="TabCommandController\npin / close / copy / location", URL="\ref TabsManagerExtension.Controls.Tabs.TabCommandController"];
+    input [label="TabInputController\nkeyboard / pointer / focus", URL="\ref TabsManagerExtension.Controls.Tabs.TabInputController"];
+    menus [label="VirtualMenuController\nTabMenuItemFactory", URL="\ref TabsManagerExtension.Controls.Tabs.VirtualMenuController"];
+    context [label="ProjectContextController\nproject-context actions", URL="\ref TabsManagerExtension.Controls.Tabs.ProjectContextController"];
+
+    history [label="ClosedTabsHistory\nClosedTabsRestorer", fillcolor="#253b56", URL="\ref TabsManagerExtension.Controls.Tabs.ClosedTabsHistory"];
+    session [label="ToolWindowSessionManager\nrestore + persistence", fillcolor="#253b56", URL="\ref TabsManagerExtension.Controls.Tabs.ToolWindowSessionManager"];
+    presentation [label="TabAppearanceManager\nTabRenameService", fillcolor="#253b56", URL="\ref TabsManagerExtension.Controls.Tabs.TabAppearanceManager"];
+
+    control -> bridge [label="subscribe"];
+    control -> lifecycle [label="subscribe"];
+    control -> files [label="start / stop"];
+    control -> workspace;
+    control -> activation;
+    control -> commands;
+    control -> input;
+    control -> menus;
+
+    bridge -> workspace [label="document / window"];
+    bridge -> activation [label="window / frame"];
+    lifecycle -> workspace [label="closing / closed"];
+    lifecycle -> activation [label="IsSolutionClosing"];
+    files -> workspace [label="change / rename / delete"];
+    workspace -> collection;
+    workspace -> activation [label="initial sync"];
+    workspace -> state;
+    workspace -> history;
+    workspace -> session;
+    activation -> collection;
+    activation -> selection;
+    activation -> session;
+    state -> collection;
+
+    commands -> collection;
+    commands -> history;
+    input -> selection;
+    input -> commands [label="Delete / Ctrl+Z"];
+    menus -> context;
+    context -> collection;
+    history -> collection [label="restore"];
+    presentation -> control [style=dashed, label="resources / rename"];
+
+    { rank=same; bridge; lifecycle; files; }
+    { rank=same; workspace; activation; state; }
+    { rank=same; commands; input; menus; context; }
+    { rank=same; history; session; presentation; }
+}
+@enddot
+
+@section tabs_ui_responsibilities Ответственности
+
+| Компонент | Владеет | Не владеет |
+|---|---|---|
+| @ref TabsManagerExtension.Controls.Tabs.TabCollectionManager | Группы, поиск, добавление, удаление и перемещение `TabItem` | DTE-события и WPF |
+| @ref TabsManagerExtension.Controls.Tabs.TabsWorkspaceSynchronizer | Solution/document/window lifecycle, файловые события | Правила input и меню |
+| @ref TabsManagerExtension.Controls.Tabs.TabActivationSynchronizer | Active VS frame, primary selection, editor overlay | Полный lifecycle solution |
+| @ref TabsManagerExtension.Controls.Tabs.TabCommandController | Пользовательские команды и групповое закрытие | Навигационный фокус |
+| @ref TabsManagerExtension.Controls.Tabs.TabInputController | Keyboard/pointer/focus/edit mode | Сохранение сессии |
+| @ref TabsManagerExtension.Controls.Tabs.ProjectContextController | Меню и переключение project context | Общая синхронизация вкладок |
+| @ref TabsManagerExtension.Controls.Tabs.ToolWindowSessionManager | Снимок и отложенное восстановление tool window; состояние хранится в `settings.json` | История закрытых документов |
+| @ref TabsManagerExtension.VsShell.Solution.Services.VsSolutionEventsTrackerService | Глобальное состояние и события открытия/закрытия solution | События отдельных документов и окон |
+
+@section tabs_ui_invariants Ключевые инварианты
+
+1. Все изменения групп и `TabItem` проходят через
+   @ref TabsManagerExtension.Controls.Tabs.TabCollectionManager. `SortedTabItemsGroups` в control
+   остаётся только binding-представлением той же коллекции.
+2. `IsFrameActive` отражает фактический VS frame и не обязан совпадать с
+   `PrimarySelection` при мультивыборе.
+3. Перед `DTE Close()` создаётся снимок
+   @ref TabsManagerExtension.Controls.Tabs.ClosedTabEntry "ClosedTabEntry":
+   `DocumentClosing` приходит синхронно и сразу удаляет модель из группы.
+4. При закрытии solution история не заполняется массовыми DTE-событиями.
+   Коллекции очищаются только после подтверждённого `SolutionClosed`.
+5. DTE, `IVsWindowFrame` и WPF-коллекции обрабатываются в UI thread. File-system
+   события маршалятся через `Dispatcher`.
+
+@section tabs_ui_activation_flow Поток активации
+
+@dot
+digraph TabActivationFlow {
+    graph [rankdir=LR, bgcolor="#1b1f26", fontname="Segoe UI", fontcolor="#f1f5f9"];
+    node [shape=box, style="rounded,filled", fillcolor="#273142", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", fontsize=9];
+    edge [color="#8aa4c2", fontcolor="#d9e2ec", fontname="Segoe UI", fontsize=8];
+
+    source [label="DTE WindowActivated /\nIVsWindowFrameActivated"];
+    pending [label="pending tool-window restore?", shape=diamond, fillcolor="#51421f"];
+    lookup [label="find/create TabItem"];
+    frame [label="SetActiveFrame"];
+    select [label="SelectActivated"];
+    overlay [label="show/activate editor overlay\nor hide for tool window"];
+
+    source -> pending;
+    pending -> lookup [label="no"];
+    pending -> overlay [label="yes: keep pending frame", style=dashed];
+    lookup -> frame -> select -> overlay;
+}
+@enddot
+
+@section tabs_ui_close_flow Поток закрытия и восстановления
+
+@dot
+digraph TabCloseFlow {
+    graph [rankdir=LR, bgcolor="#1b1f26", fontname="Segoe UI", fontcolor="#f1f5f9"];
+    node [shape=box, style="rounded,filled", fillcolor="#273142", color="#718096", fontcolor="#f1f5f9", fontname="Segoe UI", fontsize=9];
+    edge [color="#8aa4c2", fontcolor="#d9e2ec", fontname="Segoe UI", fontsize=8];
+
+    command [label="TabCommandController.Close"];
+    snapshot [label="snapshot group + metadata\nmark whole batch"];
+    dte [label="DTE Document.Close"];
+    event [label="TabsWorkspaceSynchronizer\nDocumentClosing"];
+    remove [label="TabCollectionManager.Remove"];
+    history [label="ClosedTabsHistory\nsingle undo operation"];
+    restore [label="ClosedTabsRestorer\nopen + return to group"];
+
+    command -> snapshot -> dte -> event -> remove;
+    snapshot -> history [label="after confirmed close"];
+    event -> history [label="external close"];
+    history -> restore [label="Ctrl+Z"];
+    restore -> remove [label="collection update", style=dashed];
+}
+@enddot
+
+@section tabs_ui_lifecycle Жизненный цикл control
+
+- `Loaded`: создаётся event bridge, file monitor, collection/selection stack,
+  контроллеры и periodic reconciler; затем загружается снимок открытых
+  документов и tool window.
+- Во время работы event bridge и file monitor только адаптируют внешние
+  события; решения принимают workspace/activation/command controllers.
+- `Unloaded`: сохраняется сессия, отменяется pending restore, отписываются
+  события, останавливаются timers/file monitor и освобождаются VS-ресурсы.
+*/
