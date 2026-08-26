@@ -29,13 +29,22 @@ namespace TabsManagerExtension.VsShell.Document {
         }
 
 
-        public void Close() {
+        public void Close(string documentPath) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            string documentPath = this.Document.FullName;
-            var currentDocument = PackageServices.Dte2.Documents
-                .Cast<EnvDTE.Document>()
-                .FirstOrDefault(document => string.Equals(document.FullName, documentPath, StringComparison.OrdinalIgnoreCase));
+            EnvDTE.Document? currentDocument = null;
+            foreach (EnvDTE.Document document in PackageServices.Dte2.Documents) {
+                try {
+                    if (string.Equals(document.FullName, documentPath, StringComparison.OrdinalIgnoreCase)) {
+                        currentDocument = document;
+                        break;
+                    }
+                }
+                catch {
+                    // В Documents могут ещё находиться устаревшие COM-объекты временных файлов.
+                }
+            }
+
             if (currentDocument != null) {
                 // DTE координирует последовательное закрытие документов. Прямой CloseFrame при
                 // закрытии пачки может оставить часть уже скрытых фреймов незакрытыми, и VS

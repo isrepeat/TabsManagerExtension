@@ -101,8 +101,8 @@ namespace TabsManagerExtension.Controls.Tabs {
                 var tabItem = request.TabItem;
                 try {
                     if (tabItem is TMEx.State.Document.TabItemDocument tabItemDocument) {
-                        Helpers.Diagnostic.Logger.LogDebug($"close document \"{tabItemDocument.ShellDocument.Document.FullName}\"");
-                        tabItemDocument.ShellDocument.Close();
+                        Helpers.Diagnostic.Logger.LogDebug($"close document \"{tabItemDocument.FullName}\"");
+                        tabItemDocument.ShellDocument.Close(tabItemDocument.FullName);
                     }
                     else if (tabItem is TMEx.State.Document.TabItemWindow tabItemWindow) {
                         Helpers.Diagnostic.Logger.LogDebug($"close window \"{tabItemWindow.ShellWindow.Window.Caption}\"");
@@ -112,6 +112,13 @@ namespace TabsManagerExtension.Controls.Tabs {
                 }
                 catch (Exception ex) {
                     Helpers.Diagnostic.Logger.LogError($"Failed to close tab '{tabItem.Caption}': {ex}");
+                    if (tabItem is TMEx.State.Document.TabItemDocument tabItemDocument &&
+                        !this.IsDocumentOpen(tabItemDocument.FullName)) {
+
+                        // Временный документ мог исчезнуть из DTE раньше, чем пришло событие
+                        // DocumentClosing. Удаляем только осиротевшую запись панели.
+                        _tabCollectionManager.Remove(tabItemDocument);
+                    }
                 }
                 finally {
                     // DTE Close() может завершиться без исключения, хотя пользователь отменил
@@ -133,6 +140,29 @@ namespace TabsManagerExtension.Controls.Tabs {
             }
 
             _virtualMenu.HideImmediately();
+        }
+
+        private bool IsDocumentOpen(string fullPath) {
+            try {
+                foreach (EnvDTE.Document document in PackageServices.Dte2.Documents) {
+                    try {
+                        if (string.Equals(document.FullName, fullPath, StringComparison.OrdinalIgnoreCase)) {
+                            return true;
+                        }
+                    }
+                    catch {
+                        // Пропускаем уже недействительный COM-объект и проверяем остальные.
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex) {
+                // При недоступности DTE не считаем вкладку осиротевшей, чтобы не скрыть
+                // потенциально ещё открытый документ.
+                Helpers.Diagnostic.Logger.LogWarning($"Failed to verify document '{fullPath}' while closing tab: {ex.Message}");
+                return true;
+            }
         }
 
         public void KeepOpen(object parameter) {
