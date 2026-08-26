@@ -19,7 +19,7 @@ namespace TabsManagerExtension.VsShell.TextEditor {
         public event Action<Guid, uint, IntPtr>? CommandPassedThrough;
         public bool IsEnabled { get; set; } = false;
         public bool IsSpaceCommandEnabled { get; set; }
-        // SelectAll и Undo являются глобальными командами VS и могут попасть в editor filter
+        // SelectAll, Copy и Undo являются глобальными командами VS и могут попасть в editor filter
         // раньше WPF PreviewKeyDown панели. Разрешаем их только для активного navigation mode.
         public bool AreNavigationCommandsEnabled { get; set; }
         // Дополнительная проверка принадлежности конкретной команды. Владелец панели использует
@@ -78,7 +78,9 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                 var std97Cmd = (VSConstants.VSStd97CmdID)cmdId;
                 // Общий IsEnabled также нужен для Delete и других tracked-команд, поэтому он не
                 // может выражать более узкое правило для navigation-only комбинаций.
-                if ((std97Cmd == VSConstants.VSStd97CmdID.SelectAll || std97Cmd == VSConstants.VSStd97CmdID.Undo) &&
+                if ((std97Cmd == VSConstants.VSStd97CmdID.SelectAll ||
+                     std97Cmd == VSConstants.VSStd97CmdID.Copy ||
+                     std97Cmd == VSConstants.VSStd97CmdID.Undo) &&
                     !this.AreNavigationCommandsEnabled) {
                     return false;
                 }
@@ -91,6 +93,7 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                     VSConstants.VSStd97CmdID.Cancel => Key.Escape,
                     VSConstants.VSStd97CmdID.Escape => Key.Escape,
                     VSConstants.VSStd97CmdID.SelectAll => Key.A,
+                    VSConstants.VSStd97CmdID.Copy => Key.C,
                     VSConstants.VSStd97CmdID.Undo => Key.Z,
                     _ when VsShell.VsCommandMapper.TryMapStd97ToStd2kCommand(std97Cmd, out var std2kCmd) =>
                         VsShell.VsCommandMapper.TryMapStd2kToKey(std2kCmd),
@@ -136,10 +139,13 @@ namespace TabsManagerExtension.VsShell.TextEditor {
                 var std97Cmd = (VSConstants.VSStd97CmdID)cmdId;
 
                 if (_trackedStd97Commands.Contains(std97Cmd)) {
-                    // У SelectAll и Undo нет используемого здесь отображения через VSStd2K.
+                    // У SelectAll, Copy и Undo нет используемого здесь отображения через VSStd2K.
                     // После OLE-перехвата преобразуем их в WPF KeyEvent для общего обработчика панели.
                     if (std97Cmd == VSConstants.VSStd97CmdID.SelectAll) {
                         return Key.A;
+                    }
+                    if (std97Cmd == VSConstants.VSStd97CmdID.Copy) {
+                        return Key.C;
                     }
                     if (std97Cmd == VSConstants.VSStd97CmdID.Undo) {
                         return Key.Z;

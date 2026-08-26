@@ -89,6 +89,39 @@
                 </Setter>
             </Style>
 
+            <Style x:Key="TabsToolbarActionButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="24" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="Margin" Value="0,1,1,1" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Foreground" Value="#FF999999" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ButtonBackground"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Foreground" Value="#FFD4D4D4" />
+                                    <Setter TargetName="ButtonBackground" Property="Background" Value="{StaticResource AppIsMouseOverBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Foreground" Value="White" />
+                                    <Setter TargetName="ButtonBackground" Property="Background" Value="{StaticResource AppSelectedBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
 
             <Style x:Key="TabsSettingsPanelStyle" TargetType="ContentControl">
                 <Setter Property="Background" Value="{DynamicResource AppTabsPanelBackgroundBrush}" />
@@ -353,6 +386,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Margin="6,0,0,0"
                            VerticalAlignment="Center"
@@ -366,17 +400,25 @@
                            Foreground="#FF999999"
                            FontSize="11"
                            Visibility="Collapsed" />
-                <ToggleButton Grid.Column="2"
+                <Button Grid.Column="2"
+                        Style="{StaticResource TabsToolbarActionButtonStyle}"
+                        ToolTip="Copy selected tab names (Ctrl+C)"
+                        Command="{Binding OnCopySelectedTabNamesCommand}">
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               FontSize="12"
+                               Text="&#xE8C8;" />
+                </Button>
+                <ToggleButton Grid.Column="3"
                               Style="{StaticResource TabsEditModeToggleStyle}"
                               ToolTip="Toggle tab selection mode"
                               IsChecked="{Binding IsTabEditMode, Mode=TwoWay}" />
-                <Button Grid.Column="3"
+                <Button Grid.Column="4"
                         Style="{StaticResource TabsToolbarMenuButtonStyle}"
                         ToolTip="Tabs Manager settings"
                         Command="{Binding OnToolbarMenuShowCommand}"
                         CommandParameter="{Binding RelativeSource={RelativeSource Self}}" />
                 <localControls:MenuControl x:Name="ToolbarMenu"
-                                           Grid.ColumnSpan="4"
+                                           Grid.ColumnSpan="5"
                                            MenuItems="{Binding ToolbarMenuItems}"
                                            OpenCommand="{Binding OnToolbarMenuOpenCommand}"
                                            CloseCommand="{Binding OnToolbarMenuClosedCommand}" />

@@ -49,8 +49,16 @@ namespace TabsManagerExtension.Controls.Tabs {
             return items;
         }
 
-        public IReadOnlyList<Helpers.IMenuItem> CreateMultipleSelectionContextMenu(TMEx.State.Document.TabItemBase anchorTabItem) {
-            return new[] {
+        public IReadOnlyList<Helpers.IMenuItem> CreateMultipleSelectionContextMenu(
+            TMEx.State.Document.TabItemBase anchorTabItem,
+            IReadOnlyList<TMEx.State.Document.TabItemBase> selectedTabItems
+            ) {
+            return new Helpers.IMenuItem[] {
+                // Popup закрывается до выполнения команды. Снимок selection не даёт клику по
+                // меню изменить набор вкладок, чьи значения нужно скопировать.
+                this.CreateCommand(State.Constants.UI.CopyTabNames, _copyNameCommand, selectedTabItems),
+                this.CreateCommand(State.Constants.UI.CopyTabPaths, _copyPathCommand, selectedTabItems),
+                new Helpers.MenuItemSeparator(),
                 this.CreateCommand(State.Constants.UI.CloseSelectedTabs, _closeSelectedCommand, anchorTabItem)
             };
         }

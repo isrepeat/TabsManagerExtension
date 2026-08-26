@@ -30,6 +30,14 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             VSConstants.VSStd2KCmdID.DOWN_EXT,
             VSConstants.VSStd2KCmdID.LEFT,
             VSConstants.VSStd2KCmdID.RIGHT,
+            VSConstants.VSStd2KCmdID.HOME,
+            VSConstants.VSStd2KCmdID.HOME_EXT,
+            VSConstants.VSStd2KCmdID.BOL,
+            VSConstants.VSStd2KCmdID.BOL_EXT,
+            VSConstants.VSStd2KCmdID.END,
+            VSConstants.VSStd2KCmdID.END_EXT,
+            VSConstants.VSStd2KCmdID.EOL,
+            VSConstants.VSStd2KCmdID.EOL_EXT,
             VSConstants.VSStd2KCmdID.RETURN,
             VSConstants.VSStd2KCmdID.CANCEL,
             VSConstants.VSStd2KCmdID.DELETE,
@@ -43,6 +51,7 @@ namespace TabsManagerExtension.VsShell.TextEditor.Services {
             VSConstants.VSStd97CmdID.Cancel,
             VSConstants.VSStd97CmdID.Escape,
             VSConstants.VSStd97CmdID.SelectAll,
+            VSConstants.VSStd97CmdID.Copy,
             VSConstants.VSStd97CmdID.Undo,
         };
 

@@ -14,7 +14,7 @@ using Microsoft.VisualStudio.Extensibility.Settings;
 using Newtonsoft.Json;
 
 namespace TabsManagerExtension.Settings {
-    // Единственный источник пользовательских значений — локальный settings.json. Unified Settings используется
+    // Единственный источник пользовательских значений — локальный файл настроек. Unified Settings используется
     // только как мост для нескольких элементов стандартного окна Options и не хранит оформление панели.
     internal static class TabsManagerSettingsService {
         private sealed class LegacyToolWindowState {
@@ -25,10 +25,19 @@ namespace TabsManagerExtension.Settings {
         public const string DefaultAnchorSectionPattern = @"^\s*//\s*░(?!░)\s*(?<title>[^\r\n]+?)\s*\r?\n\s*//\s*░{3,}\s*(?=\r?\n|$)";
         public const string DefaultAnchorSubsectionPattern = @"^\s*//\s*░(?!░)\s*(?<title>[^\r\n]+?)\s*(?=\r?\n|$)";
 
+#if DEBUG
+        private const string SettingsFileName = "settings.dbg.json";
+        private const string LegacySettingsFileName = "configuration.dbg.json";
+#else
+        private const string SettingsFileName = "settings.json";
+        private const string LegacySettingsFileName = "configuration.json";
+#endif
+
         private static readonly object _sync = new object();
         private static readonly string _settingsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TabsManagerExtension");
-        private static readonly string _settingsPath = Path.Combine(_settingsDirectory, "settings.json");
-        private static readonly string _legacySettingsPath = Path.Combine(_settingsDirectory, "configuration.json");
+        // Отладочная VSIX не должна менять пользовательское состояние установленной Release-версии.
+        private static readonly string _settingsPath = Path.Combine(_settingsDirectory, SettingsFileName);
+        private static readonly string _legacySettingsPath = Path.Combine(_settingsDirectory, LegacySettingsFileName);
         private static readonly List<IDisposable> _settingsSubscriptions = new List<IDisposable>();
         private static readonly CancellationTokenSource _shutdownCancellation = new CancellationTokenSource();
         private static TabsManagerSettings? _settings;
@@ -154,6 +163,14 @@ namespace TabsManagerExtension.Settings {
 
         public static bool ShowTabsToggleToolbarButton => Load().ShowTabsToggleToolbarButton;
         public static bool ShowStandardTabsLayoutToolbarButton => Load().ShowStandardTabsLayoutToolbarButton;
+
+        public static bool IsTabEditMode {
+            get {
+                lock (_sync) {
+                    return Load().IsTabEditMode;
+                }
+            }
+        }
 
         public static IReadOnlyList<string> OpenToolWindowIds {
             get {
@@ -441,6 +458,18 @@ namespace TabsManagerExtension.Settings {
             }
         }
 
+        public static void SetTabEditMode(bool value) {
+            lock (_sync) {
+                var settings = Load();
+                if (settings.IsTabEditMode == value) {
+                    return;
+                }
+
+                settings.IsTabEditMode = value;
+                Save(settings);
+            }
+        }
+
         public static void SetTabsScaleFactor(double value) {
             double normalizedValue = NormalizeTabsScaleFactor(value);
             lock (_sync) {
@@ -573,7 +602,6 @@ namespace TabsManagerExtension.Settings {
             // Под блокировкой формируется согласованный снимок всех кэшированных значений.
             lock (_sync) {
                 var settings = Load();
-                settings.Version = 2;
                 settings.AutoLoadCustomTabs = _autoLoadCustomTabs;
                 settings.TabsScaleFactor = _tabsScaleFactor;
                 settings.AnchorSectionPattern = _anchorSectionPattern;
@@ -649,7 +677,6 @@ namespace TabsManagerExtension.Settings {
             _settings.Appearance ??= new Dictionary<string, string>();
 
             if (migratedLegacySettings) {
-                _settings.Version = 2;
                 if (Save(_settings)) {
                     DeleteLegacySettings();
                 }

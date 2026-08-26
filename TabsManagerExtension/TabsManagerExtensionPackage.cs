@@ -16,6 +16,7 @@ using Microsoft.VisualStudio.Shell.Interop;
 using Microsoft.VisualStudio.VCCodeModel;
 using Microsoft.VisualStudio.TextManager.Interop;
 using Microsoft.VisualStudio.VCProjectEngine;
+using Microsoft.VisualStudio.ExtensionManager;
 using Task = System.Threading.Tasks.Task;
 
 // Add AUTO_ENABLE_CUSTOM_TABS to DefineConstants to restore automatic left layout
@@ -48,7 +49,30 @@ namespace TabsManagerExtension {
     [Guid(TabsManagerExtensionPackage.PackageGuidString)]
     public sealed class TabsManagerExtensionPackage : AsyncPackage {
         public const string PackageGuidString = "7a0ce045-e2ba-4f14-8b80-55cfd666e3d8";
+        // Идентификатор VSIX из source.extension.vsixmanifest. Extension Manager использует
+        // его для поиска именно установленного экземпляра всего расширения.
+        private const string ExtensionId = "TabsManagerExtension.93937105-d7bb-4eee-9a06-2eb9d8353aab";
         private static TabsManagerExtensionPackage? _instance;
+
+        // Версия берётся из Header установленного VSIX, а не дублируется в коде UI.
+        // TryGetInstalledExtension также безопасен для временно недоступного пакета.
+        internal static string GetInstalledExtensionVersion() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            try {
+                var extensionManager = Package.GetGlobalService(typeof(SVsExtensionManager)) as IVsExtensionManager;
+                if (extensionManager != null &&
+                    extensionManager.TryGetInstalledExtension(ExtensionId, out var extension) &&
+                    extension?.Header?.Version != null) {
+
+                    return extension.Header.Version.ToString();
+                }
+            }
+            catch (Exception ex) {
+                Helpers.Diagnostic.Logger.LogWarning($"Failed to get installed Tabs Manager extension version: {ex.Message}");
+            }
+
+            return "unknown";
+        }
 
         // Синхронная точка входа используется командами VS и передаёт работу в JTF без блокировки UI.
         internal static void ShowOptions() {

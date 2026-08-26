@@ -147,16 +147,12 @@ namespace TabsManagerExtension.Controls.Tabs {
 
         public void CopyName(object parameter) {
             ThreadHelper.ThrowIfNotOnUIThread();
-            if (parameter is TMEx.State.Document.TabItemBase tabItem) {
-                this.CopyText(tabItem.Caption, "name");
-            }
+            this.CopyTabValues(parameter, tabItem => tabItem.Caption, "name");
         }
 
         public void CopyPath(object parameter) {
             ThreadHelper.ThrowIfNotOnUIThread();
-            if (parameter is TMEx.State.Document.TabItemBase tabItem) {
-                this.CopyText(tabItem.FullName, "path");
-            }
+            this.CopyTabValues(parameter, tabItem => tabItem.FullName, "path");
         }
 
         public void OpenLocation(object parameter) {
@@ -187,6 +183,34 @@ namespace TabsManagerExtension.Controls.Tabs {
             catch (Exception ex) {
                 Helpers.Diagnostic.Logger.LogError($"Failed to copy tab {valueKind} to clipboard: {ex}");
             }
+        }
+
+        private void CopyTabValues(
+            object parameter,
+            Func<TMEx.State.Document.TabItemBase, string> valueSelector,
+            string valueKind
+            ) {
+            IReadOnlyList<TMEx.State.Document.TabItemBase> tabItems;
+            if (parameter is IReadOnlyList<TMEx.State.Document.TabItemBase> selectedTabItems) {
+                tabItems = selectedTabItems;
+            }
+            else if (parameter is TMEx.State.Document.TabItemBase anchorTabItem) {
+                var selectedItems = _selectionCoordinator.SelectedItems;
+                bool copySelection = selectedItems.Count > 1 &&
+                    selectedItems.Any(entry => ReferenceEquals(entry.Item, anchorTabItem));
+                tabItems = copySelection
+                    ? selectedItems.Select(entry => entry.Item).ToList()
+                    : new[] { anchorTabItem };
+            }
+            else {
+                tabItems = _selectionCoordinator.SelectedItems.Select(entry => entry.Item).ToList();
+            }
+
+            if (tabItems.Count == 0) {
+                return;
+            }
+
+            this.CopyText(string.Join(Environment.NewLine, tabItems.Select(valueSelector)), valueKind);
         }
     }
 }

@@ -1,4 +1,6 @@
 ﻿using System;
+using System.IO;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
@@ -136,7 +138,11 @@ namespace TabsManagerExtension.Controls {
 
 
         private WeakReference<MenuControl>? _cachedWeakMenuControl;
+        private IReadOnlyList<State.Document.TabItemDocument> _renameGroupTabItems = Array.Empty<State.Document.TabItemDocument>();
         private bool _isCompletingRename;
+        private bool _isRenameFileNameOnlySelected;
+        private DateTime _lastPointerNavigationUtc;
+        private bool _restoreRenameFocusAfterPointerActivation;
 
         public TabItemControl() {
             this.InitializeComponent();
@@ -171,29 +177,89 @@ namespace TabsManagerExtension.Controls {
             }
         }
 
-        public void BeginRename() {
+        public void BeginRename(IReadOnlyList<State.Document.TabItemDocument> renameGroupTabItems) {
             this.RenameText = this.Title;
+            _renameGroupTabItems = renameGroupTabItems;
+            _restoreRenameFocusAfterPointerActivation = DateTime.UtcNow - _lastPointerNavigationUtc <= TimeSpan.FromMilliseconds(500);
             this.IsRenaming = true;
             this.Dispatcher.BeginInvoke(new Action(() => {
                 this.RenameTextBox.Focus();
                 Keyboard.Focus(this.RenameTextBox);
-                this.RenameTextBox.SelectAll();
+                this.SelectRenameFileName();
             }), DispatcherPriority.Input);
         }
 
+        public void ToggleRenameSelection() {
+            if (!this.IsRenaming) {
+                return;
+            }
+
+            if (_isRenameFileNameOnlySelected) {
+                this.RenameTextBox.SelectAll();
+                _isRenameFileNameOnlySelected = false;
+                return;
+            }
+
+            this.SelectRenameFileName();
+        }
+
+        private void SelectRenameFileName() {
+            string text = this.RenameTextBox.Text;
+            string extension = Path.GetExtension(text);
+            this.RenameTextBox.Select(0, text.Length - extension.Length);
+            _isRenameFileNameOnlySelected = true;
+        }
+
         private void RenameTextBox_OnKeyDown(object sender, KeyEventArgs e) {
-            if (e.Key == Key.Enter) {
+            if (e.Key == Key.F2 && Keyboard.Modifiers == ModifierKeys.None) {
+                this.ToggleRenameSelection();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Home || e.Key == Key.End) {
+                // Visual Studio может передать Home/End как editor-команду, поэтому явно
+                // снимаем выделение и ставим каретку в край.
+                int targetPosition = e.Key == Key.Home ? 0 : this.RenameTextBox.Text.Length;
+                bool extendSelection = (Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+                if (extendSelection) {
+                    int anchorPosition = this.RenameTextBox.CaretIndex;
+                    this.RenameTextBox.Select(
+                        Math.Min(anchorPosition, targetPosition),
+                        Math.Abs(anchorPosition - targetPosition)
+                    );
+                }
+                else {
+                    this.RenameTextBox.Select(targetPosition, 0);
+                }
+
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter) {
                 this.CompleteRename();
                 e.Handled = true;
             }
             else if (e.Key == Key.Escape) {
                 this.IsRenaming = false;
+                _renameGroupTabItems = Array.Empty<State.Document.TabItemDocument>();
+                _restoreRenameFocusAfterPointerActivation = false;
                 this.RestoreOwnerInputTarget();
                 e.Handled = true;
             }
         }
 
         private void RenameTextBox_OnLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) {
+            if (_restoreRenameFocusAfterPointerActivation) {
+                // Простая активация вкладки в VS завершается асинхронно. Если F2 был нажат
+                // сразу после клика, поздняя активация фрейма не должна подтверждать rename.
+                _restoreRenameFocusAfterPointerActivation = false;
+                this.Dispatcher.BeginInvoke(new Action(() => {
+                    if (this.IsRenaming) {
+                        this.RenameTextBox.Focus();
+                        Keyboard.Focus(this.RenameTextBox);
+                    }
+                }), DispatcherPriority.ContextIdle);
+                return;
+            }
+
             this.CompleteRename();
         }
 
@@ -205,11 +271,13 @@ namespace TabsManagerExtension.Controls {
             _isCompletingRename = true;
             try {
                 var owner = Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this);
-                owner?.TryRenameTabItem(this, this.RenameText);
+                owner?.TryRenameTabItem(this, this.RenameText, _renameGroupTabItems);
 
                 // Диалог ошибки сам временно забирает фокус и повторно вызывает LostKeyboardFocus.
                 // Всегда завершаем F2-сценарий после одной попытки, чтобы не зациклить проверку.
                 this.IsRenaming = false;
+                _renameGroupTabItems = Array.Empty<State.Document.TabItemDocument>();
+                _restoreRenameFocusAfterPointerActivation = false;
                 this.RestoreOwnerInputTarget();
             }
             finally {
@@ -229,6 +297,15 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
+            // Контекстное меню живёт в Popup, но его MouseLeftButtonUp всё ещё может дойти
+            // до TabItemControl через logical tree. Меню не должно активировать вкладку.
+            if (e.OriginalSource is MenuItem ||
+                e.OriginalSource is DependencyObject menuSource &&
+                Helpers.VisualTree.FindParentByType<MenuItem>(menuSource) != null) {
+
+                return;
+            }
+
             // Клик внутри поля нужен только для установки каретки/выделения. Не запускаем
             // навигацию вкладки, иначе она забирает фокус и преждевременно завершает rename.
             if (this.IsRenaming &&
@@ -246,6 +323,7 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
+            _lastPointerNavigationUtc = DateTime.UtcNow;
             Helpers.VisualTree.FindParentByType<TabsManagerToolWindowControl>(this)?.HandleTabPointerNavigation(this, Keyboard.Modifiers);
         }
 

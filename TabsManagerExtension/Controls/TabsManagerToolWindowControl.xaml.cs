@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows;
 using System.Windows.Input;
@@ -109,6 +109,7 @@ namespace TabsManagerExtension.Controls {
                 if (_isTabEditMode != value) {
                     _isTabEditMode = value;
                     OnPropertyChanged();
+                    Settings.TabsManagerSettingsService.SetTabEditMode(value);
 
                     if (value) {
                         this.UpdateEditModeInputRedirect();
@@ -180,6 +181,7 @@ namespace TabsManagerExtension.Controls {
         public ICommand OnToolbarMenuShowCommand { get; }
         public ICommand OnToolbarMenuOpenCommand { get; }
         public ICommand OnToolbarMenuClosedCommand { get; }
+        public ICommand OnCopySelectedTabNamesCommand { get; }
 
         public TabsManagerToolWindowControl() {
             this.InitializeComponent();
@@ -201,7 +203,7 @@ namespace TabsManagerExtension.Controls {
 
             this.OnTabItemContextMenuOpenCommand = new Helpers.RelayCommand<object>(this.OnTabItemContextMenuOpen);
             this.OnTabItemContextMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnTabItemContextMenuClosed);
-            
+
             this.OnTabItemVirtualMenuOpenCommand = new Helpers.RelayCommand<object>(this.OnTabItemVirtualMenuOpen);
             this.OnTabItemVirtualMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnTabItemVirtualMenuClosed);
             this.OnProjectContextIncludersOpenCommand = new Helpers.RelayCommand<object>(this.OnProjectContextIncludersOpen);
@@ -209,6 +211,8 @@ namespace TabsManagerExtension.Controls {
             this.OnToolbarMenuShowCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuShow);
             this.OnToolbarMenuOpenCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuOpen);
             this.OnToolbarMenuClosedCommand = new Helpers.RelayCommand<object>(this.OnToolbarMenuClosed);
+            this.OnCopySelectedTabNamesCommand = new Helpers.RelayCommand<object>(this.OnCopyTabName);
+
             _tabMenuItemFactory = new TMEx.Controls.Tabs.TabMenuItemFactory(
                 this.OnCopyTabName,
                 this.OnCopyTabPath,
@@ -249,6 +253,9 @@ namespace TabsManagerExtension.Controls {
             // актуальные команды и их доступность определяются непосредственно перед показом popup.
             var unavailableCommand = new Helpers.RelayCommand(() => { }, () => false);
             this.ToolbarMenuItems = new ObservableCollection<Helpers.IMenuItem> {
+                new Helpers.MenuItemHeader {
+                    Header = $"TabsManagerExtension v{TabsManagerExtensionPackage.GetInstalledExtensionVersion()}"
+                },
                 new Helpers.MenuItemCommand {
                     Header = "Save tab layout (coming soon)",
                     Command = unavailableCommand
@@ -276,6 +283,9 @@ namespace TabsManagerExtension.Controls {
             Settings.TabsManagerSettingsService.TabsScaleFactorChanged += this.OnTabsScaleFactorChanged;
             Settings.TabsManagerSettingsService.AppearanceChanged += this.OnAppearanceChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.AddTrackedInputElement(this);
+            // Режим восстанавливаем только после регистрации: его включение перенаправляет
+            // команды редактора в эту панель через TextEditorInputCommandFilterService.
+            this.IsTabEditMode = Settings.TabsManagerSettingsService.IsTabEditMode;
             this.UpdateEditModeInputRedirect();
             Services.ExtensionStatusService.Instance.FeatureReadinessChanged += this.OnFeatureReadinessChanged;
             this.IsIncludeGraphReady = Services.ExtensionStatusService.Instance.IsFeatureReady(
@@ -299,6 +309,7 @@ namespace TabsManagerExtension.Controls {
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e) {
+            Settings.TabsManagerSettingsService.SetTabEditMode(this.IsTabEditMode);
             Settings.TabsManagerSettingsService.TabsScaleFactorChanged -= this.OnTabsScaleFactorChanged;
             Settings.TabsManagerSettingsService.AppearanceChanged -= this.OnAppearanceChanged;
             VsShell.TextEditor.Services.TextEditorInputCommandFilterService.Instance.SetForcedInputTarget(null);
@@ -356,6 +367,12 @@ namespace TabsManagerExtension.Controls {
         private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            // Правая кнопка открывает контекстное меню и никогда не меняет текущий набор
+            // выбранных вкладок. Это также исключает сброс selection при повторном открытии Popup.
+            if (e.ChangedButton != MouseButton.Left) {
+                return;
+            }
+
             // У DocumentContainer намеренно нет Background: пустая область не должна сама становиться
             // WPF-целью ввода. Поэтому определяем попадание по координатам на корневом PreviewMouseDown.
             var pointerPosition = e.GetPosition(this.DocumentContainer);
@@ -372,13 +389,18 @@ namespace TabsManagerExtension.Controls {
             bool isButtonInteraction = originalSource is System.Windows.Controls.Primitives.ButtonBase ||
                 originalSource != null && Helpers.VisualTree.FindParentByType<System.Windows.Controls.Primitives.ButtonBase>(originalSource) != null;
 
+            // Popup контекстного меню находится в отдельном визуальном дереве. Его клик не
+            // должен попасть в обработчик пустой области и свернуть мультивыбор вкладок.
+            bool isMenuInteraction = originalSource is Controls.MenuControl ||
+                originalSource != null && Helpers.VisualTree.FindParentByType<Controls.MenuControl>(originalSource) != null;
+
             // Popup может визуально находиться над DocumentContainer, хотя логически относится
             // к ComboBox в нижней панели. Общая проверка интерактивного пути существовала до
             // 5ac1151 и не даёт принять ComboBoxItem/TextBox за клик по пустой области вкладок.
             bool isInteractiveInteraction = originalSource != null && this.ex_HasInteractiveElementOnPathFrom(originalSource);
             // Клик по вкладке или любому интерактивному контролу имеет собственную семантику
             // и не считается кликом по пустой области.
-            if (isInsideDocumentContainer && !isTabInteraction && !isButtonInteraction && !isInteractiveInteraction) {
+            if (isInsideDocumentContainer && !isTabInteraction && !isButtonInteraction && !isMenuInteraction && !isInteractiveInteraction) {
                 // Сбрасываем мультивыбор явно: повторная активация уже открытого документа
                 // может не породить событие DTE после команд контекстного меню.
                 var activeFrameTabItem = _tabCollectionManager.AllTabs
@@ -580,7 +602,8 @@ namespace TabsManagerExtension.Controls {
                 _closedTabsHistory,
                 _tabAppearanceManager,
                 this.CloseTabItems,
-                this.RestoreLastClosedTabsOperation
+                this.RestoreLastClosedTabsOperation,
+                () => this.OnCopyTabName(null)
             );
             _tabActivationSynchronizer = new TMEx.Controls.Tabs.TabActivationSynchronizer(
                 PackageServices.Dte2,
@@ -846,11 +869,13 @@ namespace TabsManagerExtension.Controls {
                 return;
             }
 
-            bool isAnchorSelected = _tabItemsSelectionCoordinator.SelectedItems
-                .Any(entry => ReferenceEquals(entry.Item, tabItem));
+            var selectedTabItems = _tabItemsSelectionCoordinator.SelectedItems
+                .Select(entry => entry.Item)
+                .ToList();
+            bool isAnchorSelected = selectedTabItems.Any(selectedTabItem => ReferenceEquals(selectedTabItem, tabItem));
             if (isAnchorSelected) {
                 this.ContextMenuItems = new ObservableCollection<Helpers.IMenuItem>(
-                    _tabMenuItemFactory.CreateMultipleSelectionContextMenu(tabItem)
+                    _tabMenuItemFactory.CreateMultipleSelectionContextMenu(tabItem, selectedTabItems)
                 );
             }
             else {
@@ -941,14 +966,18 @@ namespace TabsManagerExtension.Controls {
             return _tabInputController?.HandleEditKey(key, modifiers) == true;
         }
 
-        internal bool TryRenameTabItem(TabItemControl source, string proposedName) {
+        internal bool TryRenameTabItem(
+            TabItemControl source,
+            string proposedName,
+            IReadOnlyList<TMEx.State.Document.TabItemDocument> renameGroupTabItems
+            ) {
             ThreadHelper.ThrowIfNotOnUIThread();
             if (source.DataContext is not TMEx.State.Document.TabItemDocument tabItemDocument) {
                 this.ShowTabRenameMessage("Only document tabs can be renamed.");
                 return false;
             }
 
-            var result = _tabRenameService.Rename(tabItemDocument, proposedName);
+            var result = _tabRenameService.Rename(tabItemDocument, proposedName, renameGroupTabItems);
             if (!result.Succeeded && result.ErrorMessage != null) {
                 this.ShowTabRenameMessage(result.ErrorMessage);
             }
@@ -975,6 +1004,15 @@ namespace TabsManagerExtension.Controls {
         }
 
         private bool CanHandleRedirectedNavigationKey(Key key) {
+            if (key == Key.C) {
+                return this.IsTabEditMode;
+            }
+
+            if (key == Key.Home || key == Key.End) {
+                return Keyboard.FocusedElement is DependencyObject focusedElement &&
+                    Helpers.VisualTree.FindParentByType<TabItemControl>(focusedElement)?.IsRenaming == true;
+            }
+
             return _tabInputController?.CanHandleRedirectedKey(key) == true;
         }
 

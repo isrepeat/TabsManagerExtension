@@ -242,6 +242,14 @@
       <HintPath>$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.Interop.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Microsoft.VisualStudio.ExtensionManager">
+      <HintPath>$(DevEnvDir)PrivateAssemblies\Microsoft.VisualStudio.ExtensionManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.ExtensionEngineContract">
+      <HintPath>$(DevEnvDir)PrivateAssemblies\Microsoft.VisualStudio.ExtensionEngineContract.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Microsoft.VisualStudio.VCCodeModel">
       <HintPath>$(DevEnvDir)PublicAssemblies\Microsoft.VisualStudio.VCCodeModel.dll</HintPath>
       <Private>false</Private>

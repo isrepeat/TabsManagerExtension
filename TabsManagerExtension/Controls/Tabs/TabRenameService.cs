@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 using Microsoft.VisualStudio.Shell;
 
@@ -35,12 +36,52 @@ namespace TabsManagerExtension.Controls.Tabs {
             ".hxx"
         };
 
-        public TabRenameResult Rename(TMEx.State.Document.TabItemDocument tabItemDocument, string? proposedName) {
+        // Возвращает выделенную группу одноимённых файлов с разными поддерживаемыми расширениями,
+        // которую можно массово переименовать через шаблон "новое_имя.*".
+        public static IReadOnlyList<TMEx.State.Document.TabItemDocument> GetSelectedRenameGroup(
+            TMEx.State.Document.TabItemDocument tabItemDocument,
+            IEnumerable<TMEx.State.Document.TabItemBase> selectedTabItems
+            ) {
+            var selectedItems = selectedTabItems.ToList();
+            var documentTabItems = selectedItems
+                .OfType<TMEx.State.Document.TabItemDocument>()
+                .ToList();
+            if (documentTabItems.Count < 2 ||
+                documentTabItems.Count != selectedItems.Count ||
+                !documentTabItems.Any(item => ReferenceEquals(item, tabItemDocument))) {
+                return Array.Empty<TMEx.State.Document.TabItemDocument>();
+            }
+
+            string directory = Path.GetDirectoryName(tabItemDocument.FullName) ?? string.Empty;
+            string baseName = Path.GetFileNameWithoutExtension(tabItemDocument.FullName);
+            bool isRenameGroup = documentTabItems.All(candidate =>
+                string.Equals(Path.GetDirectoryName(candidate.FullName) ?? string.Empty, directory, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Path.GetFileNameWithoutExtension(candidate.FullName), baseName, StringComparison.OrdinalIgnoreCase) &&
+                RenamableExtensions.Contains(Path.GetExtension(candidate.FullName))
+            );
+            bool haveDifferentExtensions = documentTabItems
+                .Select(candidate => Path.GetExtension(candidate.FullName))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() == documentTabItems.Count;
+            return isRenameGroup && haveDifferentExtensions
+                ? documentTabItems
+                : Array.Empty<TMEx.State.Document.TabItemDocument>();
+        }
+
+        public TabRenameResult Rename(
+            TMEx.State.Document.TabItemDocument tabItemDocument,
+            string? proposedName,
+            IReadOnlyList<TMEx.State.Document.TabItemDocument> renameGroupTabItems
+            ) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
             string oldPath = tabItemDocument.FullName;
             string oldExtension = Path.GetExtension(oldPath);
             string newName = proposedName?.Trim() ?? string.Empty;
+            if (string.Equals(Path.GetExtension(newName), ".*", StringComparison.Ordinal)) {
+                return this.RenameGroupWithPreservedExtensions(tabItemDocument, newName, renameGroupTabItems);
+            }
+
             if (string.Equals(Path.GetFileName(oldPath), newName, StringComparison.Ordinal)) {
                 return TabRenameResult.Success();
             }
@@ -85,10 +126,94 @@ namespace TabsManagerExtension.Controls.Tabs {
                 projectItem.Name = newName;
                 tabItemDocument.Caption = tabItemDocument.ShellDocument.Document.Name;
                 tabItemDocument.FullName = tabItemDocument.ShellDocument.Document.FullName;
+
                 return TabRenameResult.Success();
+            }
+            catch (NotImplementedException ex) {
+                // Miscellaneous Files не реализует ProjectItem.Name. Закрываем документ до
+                // файлового rename, затем открываем его по новому пути, чтобы VS получил новый moniker.
+                Helpers.Diagnostic.Logger.LogWarning($"ProjectItem rename is not implemented for '{oldPath}': {ex.Message}");
+                return this.RenameMiscellaneousFile(tabItemDocument, oldPath, newPath, newName);
             }
             catch (Exception ex) {
                 Helpers.Diagnostic.Logger.LogError($"Failed to rename tab '{oldPath}' to '{newName}': {ex}");
+                return TabRenameResult.Failure($"Visual Studio could not rename '{Path.GetFileName(oldPath)}' to '{newName}'.\n\n{ex.Message}");
+            }
+        }
+
+        // Переименовывает все файлы согласованной группы, заменяя только базовое имя и сохраняя
+        // индивидуальное расширение каждого файла.
+        private TabRenameResult RenameGroupWithPreservedExtensions(
+            TMEx.State.Document.TabItemDocument tabItemDocument,
+            string proposedName,
+            IReadOnlyList<TMEx.State.Document.TabItemDocument> renameGroupTabItems
+            ) {
+            string newBaseName = Path.GetFileNameWithoutExtension(proposedName);
+            if (string.IsNullOrWhiteSpace(newBaseName) ||
+                !string.Equals(newBaseName, Path.GetFileName(newBaseName), StringComparison.Ordinal) ||
+                newBaseName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) {
+
+                return TabRenameResult.Failure("Enter a valid file name before '.*'.");
+            }
+
+            var tabItems = renameGroupTabItems.Count > 1
+                ? renameGroupTabItems
+                : Array.Empty<TMEx.State.Document.TabItemDocument>();
+            if (tabItems.Count == 0 || !tabItems.Any(item => ReferenceEquals(item, tabItemDocument))) {
+                return TabRenameResult.Failure("Use '.*' only for a selected group of files with the same name.");
+            }
+
+            foreach (var item in tabItems) {
+                string directory = Path.GetDirectoryName(item.FullName) ?? string.Empty;
+                string targetName = newBaseName + Path.GetExtension(item.FullName);
+                string targetPath = Path.Combine(directory, targetName);
+                if (!string.Equals(item.FullName, targetPath, StringComparison.OrdinalIgnoreCase) && File.Exists(targetPath)) {
+                    return TabRenameResult.Failure($"A file named '{targetName}' already exists in this directory.");
+                }
+            }
+
+            foreach (var item in tabItems) {
+                string targetName = newBaseName + Path.GetExtension(item.FullName);
+                var result = this.Rename(item, targetName, Array.Empty<TMEx.State.Document.TabItemDocument>());
+                if (!result.Succeeded) {
+                    return TabRenameResult.Failure(
+                        $"Some files were renamed before '{Path.GetFileName(item.FullName)}' failed.\n\n{result.ErrorMessage}"
+                    );
+                }
+            }
+
+            return TabRenameResult.Success();
+        }
+
+        // Обрабатывает файлы из Miscellaneous Files: у них нет реализации ProjectItem.Name,
+        // поэтому файл переименовывается через файловую систему и заново открывается в VS.
+        private TabRenameResult RenameMiscellaneousFile(
+            TMEx.State.Document.TabItemDocument tabItemDocument,
+            string oldPath,
+            string newPath,
+            string newName
+            ) {
+            bool fileMoved = false;
+            try {
+                var document = tabItemDocument.ShellDocument.Document;
+                document.Save();
+                document.Close(EnvDTE.vsSaveChanges.vsSaveChangesNo);
+                File.Move(oldPath, newPath);
+                fileMoved = true;
+                PackageServices.Dte2.ItemOperations.OpenFile(newPath);
+                return TabRenameResult.Success();
+            }
+            catch (Exception ex) {
+                if (!fileMoved && File.Exists(oldPath)) {
+                    try {
+                        PackageServices.Dte2.ItemOperations.OpenFile(oldPath);
+                    }
+                    catch (Exception reopenException) {
+                        Helpers.Diagnostic.Logger.LogWarning($"Failed to reopen '{oldPath}' after rename failure: {reopenException.Message}");
+                    }
+                }
+
+                Helpers.Diagnostic.Logger.LogError($"Failed to rename miscellaneous file '{oldPath}' to '{newPath}': {ex}");
                 return TabRenameResult.Failure($"Visual Studio could not rename '{Path.GetFileName(oldPath)}' to '{newName}'.\n\n{ex.Message}");
             }
         }

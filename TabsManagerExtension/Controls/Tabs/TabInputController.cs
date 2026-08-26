@@ -25,6 +25,7 @@ namespace TabsManagerExtension.Controls.Tabs {
         private readonly TabAppearanceManager _appearanceManager;
         private readonly Action<IReadOnlyList<TMEx.State.Document.TabItemBase>> _onCloseTabs;
         private readonly Action _onRestoreClosedTabs;
+        private readonly Action _onCopySelectedTabNames;
         private readonly HashSet<TabItemControl> _tabItemControls = new();
 
         public TabInputController(
@@ -41,7 +42,8 @@ namespace TabsManagerExtension.Controls.Tabs {
             ClosedTabsHistory closedTabsHistory,
             TabAppearanceManager appearanceManager,
             Action<IReadOnlyList<TMEx.State.Document.TabItemBase>> onCloseTabs,
-            Action onRestoreClosedTabs
+            Action onRestoreClosedTabs,
+            Action onCopySelectedTabNames
             ) {
             _focusScope = focusScope;
             _focusTarget = focusTarget;
@@ -57,6 +59,7 @@ namespace TabsManagerExtension.Controls.Tabs {
             _appearanceManager = appearanceManager;
             _onCloseTabs = onCloseTabs;
             _onRestoreClosedTabs = onRestoreClosedTabs;
+            _onCopySelectedTabNames = onCopySelectedTabNames;
         }
 
         public void Register(TabItemControl control) {
@@ -74,6 +77,8 @@ namespace TabsManagerExtension.Controls.Tabs {
             _tabItemControls.Remove(control);
         }
 
+        // Обрабатывает команды режима редактирования вкладок и сообщает, должна ли клавиша
+        // считаться обработанной до передачи в стандартный редактор Visual Studio.
         public bool HandleEditKey(Key key, ModifierKeys modifiers) {
             if (!_isEditMode()) {
                 return false;
@@ -81,7 +86,31 @@ namespace TabsManagerExtension.Controls.Tabs {
 
             bool isControlPressed = (modifiers & ModifierKeys.Control) == ModifierKeys.Control;
             if (key == Key.F2 && modifiers == ModifierKeys.None) {
-                this.FindControl(_keyboardNavigation.FocusedItem)?.BeginRename();
+                var focusedItem = _keyboardNavigation.FocusedItem;
+                if (focusedItem == null) {
+                    return true;
+                }
+
+                var focusedControl = this.FindControl(focusedItem);
+                if (focusedControl?.IsRenaming == true) {
+                    focusedControl.ToggleRenameSelection();
+                    return true;
+                }
+
+                var renameGroupTabItems = focusedItem is TMEx.State.Document.TabItemDocument focusedDocumentTabItem
+                    ? TabRenameService.GetSelectedRenameGroup(
+                        focusedDocumentTabItem,
+                        _selectionCoordinator.SelectedItems.Select(entry => entry.Item)
+                    )
+                    : Array.Empty<TMEx.State.Document.TabItemDocument>();
+
+                if (renameGroupTabItems.Count == 0) {
+                    // Обычное F2 редактирует только navigation focus. Явно сворачиваем selection,
+                    // чтобы интерфейс не создавал впечатления пакетного переименования.
+                    _selectionCoordinator.SetSelection(focusedItem, true, ModifierKeys.None);
+                }
+
+                focusedControl?.BeginRename(renameGroupTabItems);
                 return true;
             }
             if (key == Key.Escape && modifiers == ModifierKeys.None) {
@@ -93,6 +122,10 @@ namespace TabsManagerExtension.Controls.Tabs {
                     _keyboardNavigation.RestoreInputTarget();
                 }
 
+                return true;
+            }
+            if (isControlPressed && key == Key.C) {
+                _onCopySelectedTabNames();
                 return true;
             }
             if (isControlPressed && key == Key.A) {
