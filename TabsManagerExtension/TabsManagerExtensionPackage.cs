@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.VisualStudio;
@@ -98,6 +99,14 @@ namespace TabsManagerExtension {
             // Do any initialization that requires the UI thread after switching to the UI thread.
             await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             _instance = this;
+
+            string logDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TabsManagerExtension"
+            );
+            string logFilePath = Path.Combine(logDirectory, "TabsManagerExtension.log");
+            Helpers.Diagnostic.Logger.EnableFileLogging(logFilePath);
+            Helpers.Diagnostic.Logger.LogDebug($"[Package] File logging enabled: '{logFilePath}'.");
             
             // TODO: adapt the CppFeatures nuget to net472 (WPF?)
             //var initFlags = CppFeatures.Cx.InitFlags.DefaultFlags | CppFeatures.Cx.InitFlags.CreateInPackageFolder;
