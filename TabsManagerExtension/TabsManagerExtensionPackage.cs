@@ -107,10 +107,6 @@ namespace TabsManagerExtension {
             string logFilePath = Path.Combine(logDirectory, "TabsManagerExtension.log");
             Helpers.Diagnostic.Logger.EnableFileLogging(logFilePath);
             Helpers.Diagnostic.Logger.LogDebug($"[Package] File logging enabled: '{logFilePath}'.");
-            
-            // TODO: adapt the CppFeatures nuget to net472 (WPF?)
-            //var initFlags = CppFeatures.Cx.InitFlags.DefaultFlags | CppFeatures.Cx.InitFlags.CreateInPackageFolder;
-            //CppFeatures.Cx.Logger.Init(AppConstants.LogFilename, initFlags);
 
             //Console.Beep(1000, 500); // 1000 Гц, 500 мс
             Settings.TabsManagerSettingsService.SettingsInitialized += this.OnSettingsInitialized;
