@@ -95,6 +95,7 @@ namespace TabsManagerExtension.Controls {
 
         private void LoadMainValuesCore() {
             this.AutoLoadTabsCheckBox.IsChecked = Settings.TabsManagerSettingsService.AutoLoadCustomTabs;
+            this.LoggingEnabledCheckBox.IsChecked = Settings.TabsManagerSettingsService.IsLoggingEnabled;
             this.AnchorSectionPatternText.Text = Settings.TabsManagerSettingsService.AnchorSectionPattern;
             this.AnchorSubsectionPatternText.Text = Settings.TabsManagerSettingsService.AnchorSubsectionPattern;
         }
@@ -132,6 +133,12 @@ namespace TabsManagerExtension.Controls {
         private void OnAutoLoadTabsChanged(object sender, RoutedEventArgs e) {
             if (!this._isLoading) {
                 Settings.TabsManagerSettingsService.SetAutoLoadCustomTabs(this.AutoLoadTabsCheckBox.IsChecked == true);
+            }
+        }
+
+        private void OnLoggingEnabledChanged(object sender, RoutedEventArgs e) {
+            if (!this._isLoading) {
+                Settings.TabsManagerSettingsService.SetLoggingEnabled(this.LoggingEnabledCheckBox.IsChecked == true);
             }
         }
 

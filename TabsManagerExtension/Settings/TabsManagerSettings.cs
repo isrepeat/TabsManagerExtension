@@ -3,6 +3,7 @@
 namespace TabsManagerExtension.Settings {
     internal sealed class TabsManagerSettings {
         public bool AutoLoadCustomTabs { get; set; } = true;
+        public bool IsLoggingEnabled { get; set; } = true;
         public double TabsScaleFactor { get; set; } = 1.0;
         public string AnchorSectionPattern { get; set; } = TabsManagerSettingsService.DefaultAnchorSectionPattern;
         public string AnchorSubsectionPattern { get; set; } = TabsManagerSettingsService.DefaultAnchorSubsectionPattern;

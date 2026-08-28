@@ -121,6 +121,14 @@ namespace TabsManagerExtension.Settings {
             }
         }
 
+        public static bool IsLoggingEnabled {
+            get {
+                lock (_sync) {
+                    return Load().IsLoggingEnabled;
+                }
+            }
+        }
+
         public static double TabsScaleFactor {
             get {
                 lock (_sync) {
@@ -369,6 +377,23 @@ namespace TabsManagerExtension.Settings {
             }
         }
 
+        public static void SetLoggingEnabled(bool value) {
+            bool changed;
+            lock (_sync) {
+                var settings = Load();
+                changed = settings.IsLoggingEnabled != value;
+                if (changed) {
+                    settings.IsLoggingEnabled = value;
+                    Save(settings);
+                }
+            }
+
+            Helpers.Diagnostic.Logger.IsLoggingEnabled = value;
+            if (value && changed) {
+                Helpers.Diagnostic.Logger.LogDebug("[Settings] Logging enabled.");
+            }
+        }
+
         public static void SetActiveSettingsSection(string section) {
             string normalizedSection = section == "customization" || section == "anchors" ? section : "main";
             lock (_sync) {
@@ -576,6 +601,7 @@ namespace TabsManagerExtension.Settings {
             // Модель нормализует отсутствующие поля, затем типизированный кэш обслуживает горячие чтения из UI.
             var settings = Load();
             _autoLoadCustomTabs = settings.AutoLoadCustomTabs;
+            Helpers.Diagnostic.Logger.IsLoggingEnabled = settings.IsLoggingEnabled;
             _tabsScaleFactor = NormalizeTabsScaleFactor(settings.TabsScaleFactor);
             _anchorSectionPattern = NormalizeAnchorPattern(settings.AnchorSectionPattern, DefaultAnchorSectionPattern, "section");
             _anchorSubsectionPattern = NormalizeAnchorPattern(settings.AnchorSubsectionPattern, DefaultAnchorSubsectionPattern, "subsection");

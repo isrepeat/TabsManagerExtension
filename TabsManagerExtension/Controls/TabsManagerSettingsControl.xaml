@@ -175,6 +175,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0"
                            Grid.ColumnSpan="2"
@@ -206,6 +207,15 @@
                           Style="{StaticResource FontOptionCheckBoxStyle}"
                           Checked="OnAutoLoadTabsChanged"
                           Unchecked="OnAutoLoadTabsChanged" />
+                <TextBlock Grid.Row="3"
+                           Style="{StaticResource SettingLabelStyle}"
+                           Text="Enable logging" />
+                <CheckBox x:Name="LoggingEnabledCheckBox"
+                          Grid.Row="3"
+                          Grid.Column="1"
+                          Style="{StaticResource FontOptionCheckBoxStyle}"
+                          Checked="OnLoggingEnabledChanged"
+                          Unchecked="OnLoggingEnabledChanged" />
             </Grid>
         </ScrollViewer>
         <!-- Шаблоны якорей редактируются как многострочные регулярные выражения. -->

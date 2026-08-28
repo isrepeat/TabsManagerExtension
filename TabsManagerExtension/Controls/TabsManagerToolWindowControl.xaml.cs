@@ -1003,7 +1003,9 @@ namespace TabsManagerExtension.Controls {
 
         private bool CanHandleRedirectedNavigationKey(Key key) {
             if (key == Key.C) {
-                return this.IsTabEditMode;
+                // Copy принадлежит панели только при реальном WPF-фокусе внутри неё.
+                // Один лишь edit mode не должен забирать Ctrl+C у текстового редактора.
+                return this.IsTabEditMode && this.IsKeyboardFocusWithin;
             }
 
             if (key == Key.Home || key == Key.End) {
