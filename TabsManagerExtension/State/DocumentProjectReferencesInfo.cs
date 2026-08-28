@@ -22,6 +22,9 @@ namespace TabsManagerExtension.State.Document {
         private IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> _availableReferencesIncludingSingleProject = Array.Empty<DocumentProjectReferencesInfo.RefEntry>();
         private Helpers.Time.DelayedEventsHandler _delayedEventsHandler;
         private bool _isInitialized;
+        // Версия снимка таблиц SolutionHierarchyAnalyzerService, по которому был заполнен
+        // _availableReferencesIncludingSingleProject. Значение -1 означает, что кэш ещё не строился.
+        private int _representationsVersion = -1;
 
         public DocumentProjectReferencesInfo(string documenFullName) {
             _documenFullName = documenFullName;
@@ -62,6 +65,8 @@ namespace TabsManagerExtension.State.Document {
 
             base.OnPropertyChanged(nameof(this.References));
             this.UpdateProperty(nameof(this.HasUnloadedProjects));
+            // Фиксируем версию только после полного обновления обоих локальных списков.
+            _representationsVersion = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance.RepresentationsVersion;
             _isInitialized = true;
         }
 
@@ -69,7 +74,10 @@ namespace TabsManagerExtension.State.Document {
         public IReadOnlyList<DocumentProjectReferencesInfo.RefEntry> GetAvailableReferences(bool includeSingleProject = false) {
             ThreadHelper.ThrowIfNotOnUIThread();
 
-            if (!_isInitialized) {
+            var solutionHierarchyAnalyzer = VsShell.Solution.Services.SolutionHierarchyAnalyzerService.Instance;
+            // Подписки проекта ловят только изменения уже известных references. Сравнение версий
+            // покрывает добавление context-а, которого в первом (например, раннем) снимке не было.
+            if (!_isInitialized || _representationsVersion != solutionHierarchyAnalyzer.RepresentationsVersion) {
                 this.UpdateReferences();
             }
 
@@ -87,6 +95,7 @@ namespace TabsManagerExtension.State.Document {
 
             _references.Clear();
             _availableReferencesIncludingSingleProject = Array.Empty<DocumentProjectReferencesInfo.RefEntry>();
+            _representationsVersion = -1;
             _isInitialized = false;
         }
 

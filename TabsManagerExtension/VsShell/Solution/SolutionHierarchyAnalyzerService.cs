@@ -179,6 +179,13 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private string _pendingSolutionName;
         private bool _analyzingInProcess = false;
 
+        // Монотонный номер опубликованного снимка Sources/SharedItems/ExternalIncludes.
+        // DocumentProjectReferencesInfo сохраняет номер, с которым построил свой кэш context-ов,
+        // и при несовпадении пересчитывает его. Это устраняет гонку background load: вкладка
+        // может появиться до того, как VS наполнит project hierarchy, и первоначально увидеть
+        // пустые таблицы; после очередного анализа старый кэш уже нельзя использовать.
+        public int RepresentationsVersion { get; private set; }
+
         public readonly Helpers.Events.Action<string> InitialAnalysisCompleted = new();
         public bool HasInitialAnalysisCompleted { get; private set; }
 
@@ -258,6 +265,9 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
 
             this.SourcesRepresentationsTable.BuildRepresentations();
             this.SharedItemsRepresentationsTable.BuildRepresentations();
+            // Публикуем новый снимок одним изменением версии после перестройки обеих таблиц,
+            // чтобы потребители не читали кэш, согласованный только с одной из них.
+            this.RepresentationsVersion++;
             _analyzingInProcess = false;
         }
 
@@ -276,6 +286,9 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             }
 
             this.ExternalIncludeRepresentationsTable.BuildRepresentations();
+            // Внешние include образуют отдельную таблицу, но участвуют в тех же context-ах.
+            // Поэтому её обновление также делает кэши вкладок неактуальными.
+            this.RepresentationsVersion++;
             _analyzingInProcess = false;
         }
 
@@ -331,6 +344,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             _lastLoadedSolutionName = null;
             _pendingSolutionName = null;
             this.HasInitialAnalysisCompleted = false;
+            this.UnsubscribeFromProjectRepresentationsChanges();
             _solutionProjects.ClearAndDispose();
         }
 
@@ -403,6 +417,7 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
         private void AnalyzeSolutionProjects() {
             ThreadHelper.ThrowIfNotOnUIThread();
 
+            this.UnsubscribeFromProjectRepresentationsChanges();
             _solutionProjects.ClearAndDispose();
 
             var vsSolution = PackageServices.VsSolution;
@@ -463,6 +478,39 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
                     _solutionProjects.Add(projectEntry);
                 }
             }
+
+            this.SubscribeToProjectRepresentationsChanges();
+        }
+
+        private void SubscribeToProjectRepresentationsChanges() {
+            foreach (var projectEntry in _solutionProjects) {
+                projectEntry.BaseViewModel.ExternalIncludesChanged.Add(this.OnProjectExternalIncludesChanged);
+                projectEntry.BaseViewModel.SharedItemsChanged.Add(this.OnProjectSharedItemsChanged);
+                projectEntry.BaseViewModel.SourcesChanged.Add(this.OnProjectSourcesChanged);
+            }
+        }
+
+        private void UnsubscribeFromProjectRepresentationsChanges() {
+            foreach (var projectEntry in _solutionProjects) {
+                projectEntry.BaseViewModel.ExternalIncludesChanged.Remove(this.OnProjectExternalIncludesChanged);
+                projectEntry.BaseViewModel.SharedItemsChanged.Remove(this.OnProjectSharedItemsChanged);
+                projectEntry.BaseViewModel.SourcesChanged.Remove(this.OnProjectSourcesChanged);
+            }
+        }
+
+        private void OnProjectExternalIncludesChanged(IReadOnlyList<Document.ExternalIncludeEntry> _) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            this.AnalyzeExternalIncludes();
+        }
+
+        private void OnProjectSharedItemsChanged(IReadOnlyList<Document.SharedItemEntry> _) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            this.AnalyzeDocuments();
+        }
+
+        private void OnProjectSourcesChanged(IReadOnlyList<Document.DocumentEntry> _) {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            this.AnalyzeDocuments();
         }
 
 

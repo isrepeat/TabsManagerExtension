@@ -221,9 +221,11 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             while (queue.Count > 0) {
                 var current = queue.Dequeue();
 
-                // Продолжаем подъём только в том project context, в котором была разрешена текущая ветка.
-                // Иначе Shared/X.h [Game] мог бы привести к Editor.cpp, включающему Shared/X.h [Editor].
-                foreach (var includer in _solutionSourceFileGraph.GetIncludersOfResolvedPath(current.FilePath, current.LoadedProject)) {
+                // Обратная карта индексируется точным абсолютным путём, в который разрешился
+                // include. Поэтому переход в другой project context безопасен: DxPlayer.cpp
+                // может включать header из Helpers.UWP, а одинаковые имена разных header'ов
+                // остаются разными ключами карты.
+                foreach (var includer in _solutionSourceFileGraph.GetIncludersOfResolvedPath(current.FilePath)) {
                     if (result.Add(includer)) {
                         queue.Enqueue(includer); // продолжаем подниматься вверх по графу
                     }
@@ -280,10 +282,10 @@ namespace TabsManagerExtension.VsShell.Solution.Services {
             while (queue.Count > 0) {
                 var current = queue.Dequeue();
 
-                // Начальные узлы собираются во всех проектах, но каждая дальнейшая ветка остаётся
-                // в своём контексте. Пример: Shared/X.h [Game] не переходит в Editor.cpp через
-                // физически тот же Shared/X.h [Editor].
-                foreach (var includer in _solutionSourceFileGraph.GetIncludersOfResolvedPath(current.FilePath, current.LoadedProject)) {
+                // Переходим между project context только через точный физический путь файла.
+                // Это связывает project references, например DxPlayer -> Helpers.UWP,
+                // и не объединяет одноимённые header'ы из разных каталогов.
+                foreach (var includer in _solutionSourceFileGraph.GetIncludersOfResolvedPath(current.FilePath)) {
                     if (result.Add(includer)) {
                         queue.Enqueue(includer);
                     }

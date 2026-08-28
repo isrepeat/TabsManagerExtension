@@ -169,6 +169,20 @@ namespace TabsManagerExtension.Controls.Tabs {
             _pendingActiveWindowId = null;
         }
 
+        public void CancelActiveWindowRestoreForUserActivation() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            if (_pendingActiveWindowFrame == null) {
+                return;
+            }
+
+            // Выбор вкладки пользователем важнее сохранённого при завершении прошлой сессии
+            // tool window. Иначе обработчик WindowActivated возвращает frame через Show()
+            // и отменяет только что запрошенную активацию документа.
+            Helpers.Diagnostic.Logger.LogDebug($"Cancel pending tool window restore after user tab activation ({_pendingActiveWindowId}).");
+            this.CancelActiveWindowRestore();
+        }
+
         public void Dispose() {
             this.CancelActiveWindowRestore();
         }

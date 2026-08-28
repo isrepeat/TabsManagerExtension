@@ -1017,6 +1017,15 @@ namespace TabsManagerExtension.Controls {
         }
 
         internal void HandleTabPointerNavigation(TabItemControl source, ModifierKeys modifiers) {
+            bool hasSelectionModifier =
+                (modifiers & ModifierKeys.Control) == ModifierKeys.Control ||
+                (modifiers & ModifierKeys.Shift) == ModifierKeys.Shift;
+            if (!hasSelectionModifier) {
+                // Обычный клик запрашивает реальную активацию документа. Не позволяем
+                // восстановлению сохранённого tool window перехватить этот выбор.
+                _toolWindowSessionManager?.CancelActiveWindowRestoreForUserActivation();
+            }
+
             _tabInputController?.HandlePointerNavigation(source, modifiers);
         }
 

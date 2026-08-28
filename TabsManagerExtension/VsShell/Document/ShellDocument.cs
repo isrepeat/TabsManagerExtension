@@ -15,13 +15,26 @@ namespace TabsManagerExtension.VsShell.Document {
 
 
         public string GetDocumentProjectName() {
+            // Для shared/external header VS может не создать DTE.ProjectItem. Однако frame
+            // сохраняет hierarchy проекта, из которого IDE разрешила #include. Проверяем его
+            // первым: у одного физического header может быть несколько project context-ов,
+            // и именно context открытия определяет группу вкладки.
+            var windowFrameProjectName = this.GetProjectNameFromWindowFrame();
+            if (windowFrameProjectName != null) {
+                return windowFrameProjectName;
+            }
+
             try {
                 var projectItem = this.Document.ProjectItem?.ContainingProject;
-                return projectItem?.Name ?? "Без проекта";
+                if (projectItem != null) {
+                    return projectItem.Name;
+                }
             }
             catch {
-                return "Без проекта";
+                // External Dependencies нередко не предоставляет ProjectItem через DTE.
             }
+
+            return "Без проекта";
         }
 
 
@@ -119,6 +132,50 @@ namespace TabsManagerExtension.VsShell.Document {
         //
         // Internal logic
         //
+        private string? GetProjectNameFromWindowFrame() {
+            ThreadHelper.ThrowIfNotOnUIThread();
+
+            var vsUiShell = PackageServices.VsUIShell;
+            // Document window enum содержит все открытые editor frames, включая External
+            // Dependencies, для которых DTE.Document.ProjectItem возвращает null.
+            if (vsUiShell == null ||
+                ErrorHandler.Failed(vsUiShell.GetDocumentWindowEnum(out var windowFramesEnum))) {
+
+                return null;
+            }
+
+            var frameArray = new IVsWindowFrame[1];
+            while (windowFramesEnum.Next(1, frameArray, out var fetched) == VSConstants.S_OK && fetched == 1) {
+                var frame = frameArray[0];
+                // Путь — стабильный идентификатор документа. Frame caption использовать нельзя:
+                // одинаковые имена header-ов и пользовательские подписи не уникальны.
+                if (frame == null ||
+                    ErrorHandler.Failed(frame.GetProperty((int)__VSFPROPID.VSFPROPID_pszMkDocument, out var documentPathObject)) ||
+                    documentPathObject is not string documentPath ||
+                    !string.Equals(documentPath, this.Document.FullName, StringComparison.OrdinalIgnoreCase)) {
+
+                    continue;
+                }
+
+                // VSFPROPID_Hierarchy указывает не на «владельца» файла на диске, а на project
+                // representation текущего editor frame. Для Ctrl+G по include это DxPlayer.
+                if (ErrorHandler.Failed(frame.GetProperty((int)__VSFPROPID.VSFPROPID_Hierarchy, out var hierarchyObject)) ||
+                    hierarchyObject is not IVsHierarchy hierarchy) {
+
+                    continue;
+                }
+
+                var project = Utils.EnvDteUtils.GetDteProjectFromHierarchy(hierarchy);
+                // Miscellaneous Files означает открытие файла вне solution и не является
+                // полезным project context-ом для группировки.
+                if (project != null && !Utils.EnvDteUtils.IsMiscProject(project)) {
+                    return project.Name;
+                }
+            }
+
+            return null;
+        }
+
         private bool ProjectContainsDocumentInProject(EnvDTE.Project project) {
             ThreadHelper.ThrowIfNotOnUIThread();
 

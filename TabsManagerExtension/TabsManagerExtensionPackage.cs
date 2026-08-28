@@ -140,8 +140,8 @@ namespace TabsManagerExtension {
 
 #if DEBUG
         // Fallback используется только экспериментальной DEBUG-средой и не влияет на VSIX Release.
-        private const string DebugSolutionPath = @"C:\WORK\Projects\TabsManagerExtension - Copy\TabsManagerExtension.sln";
-        //private const string DebugSolutionPath = @"C:\WORK\Projects\Cpp\UtilityHelpersLib\UtilityHelpersLib.sln";
+        //private const string DebugSolutionPath = @"C:\WORK\Projects\TabsManagerExtension - Copy\TabsManagerExtension.sln";
+        private const string DebugSolutionPath = @"C:\WORK\Projects\Cpp\Cpp.sln";
 
         private void ConfigureExperimentalStartup() {
             ThreadHelper.ThrowIfNotOnUIThread();

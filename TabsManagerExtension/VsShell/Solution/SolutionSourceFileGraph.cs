@@ -99,26 +99,6 @@ namespace TabsManagerExtension.VsShell.Solution {
             return Array.Empty<Document.SourceFile>();
         }
 
-
-        /// <summary>
-        /// Возвращает непосредственных включателей пути только в указанном проектном контексте.
-        /// </summary>
-        /// <remarks>
-        /// Один shared-файл может иметь несколько представлений. Например, <c>Shared/X.h [Game]</c>
-        /// может разрешать <c>Logger.h</c> в <c>Game/LocalIncludes/Logger.h</c>, а
-        /// <c>Shared/X.h [Editor]</c> — в <c>Helpers.Shared/Logger.h</c>. При подъёме по графу
-        /// нельзя переходить с ветки Game на включателей того же физического <c>X.h</c> из Editor.
-        /// </remarks>
-        public IEnumerable<Document.SourceFile> GetIncludersOfResolvedPath(
-            string resolvedPath,
-            VsShell.Project.LoadedProject projectContext
-        ) {
-            return this.GetIncludersOfResolvedPath(resolvedPath)
-                .Where(sourceFile => sourceFile.LoadedProject.ProjectGuid == projectContext.ProjectGuid)
-                .ToList();
-        }
-
-
         public bool TryGetSourceFileRepresentations(string filePath, out IReadOnlyList<Document.SourceFile> result) {
             if (_sourceFileRepresentationsMap.TryGetValue(filePath, out var list)) {
                 // Не отдаём внутренний List наружу: удаление SourceFile во время обхода такого списка
