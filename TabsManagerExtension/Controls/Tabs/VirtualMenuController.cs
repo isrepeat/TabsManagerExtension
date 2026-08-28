@@ -57,15 +57,18 @@ namespace TabsManagerExtension.Controls.Tabs {
 
             if (!_virtualMenuControl.IsMenuOpen ||
                 sender is not TabItemControl tabItemControl ||
-                tabItemControl.DataContext is not TMEx.State.Document.TabItemDocument tabItemDocument ||
-                ReferenceEquals(_virtualMenuControl.CurrentMenuDataContext, tabItemDocument)) {
+                tabItemControl.DataContext is not TMEx.State.Document.TabItemDocument tabItemDocument) {
 
                 return;
             }
 
-            this.ClearPreviousMenuFlag();
+            if (!ReferenceEquals(_virtualMenuControl.CurrentMenuDataContext, tabItemDocument)) {
+                this.ClearPreviousMenuFlag();
+            }
+
             // Уже открытое hover-меню переиспользуется для соседней вкладки без промежуточного
-            // закрытия popup, иначе при движении мыши появляется заметное мерцание.
+            // закрытия popup, иначе при движении мыши появляется заметное мерцание. Повторный
+            // вход на ту же вкладку тоже вызывает Show: он отменяет отложенное скрытие меню.
             Point screenPoint = tabItemControl.ex_ToDpiAwareScreen(new Point(tabItemControl.ActualWidth + 20, -60));
             _virtualMenuControl.Show(screenPoint, tabItemDocument);
         }
