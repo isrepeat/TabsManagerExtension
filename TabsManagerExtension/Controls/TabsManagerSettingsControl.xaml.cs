@@ -96,6 +96,8 @@ namespace TabsManagerExtension.Controls {
         private void LoadMainValuesCore() {
             this.AutoLoadTabsCheckBox.IsChecked = Settings.TabsManagerSettingsService.AutoLoadCustomTabs;
             this.LoggingEnabledCheckBox.IsChecked = Settings.TabsManagerSettingsService.IsLoggingEnabled;
+            this.LoggingSessionModeComboBox.SelectedValue = Settings.TabsManagerSettingsService.LoggingSessionMode;
+            this.UpdateLoggingSessionModeRestartMessage();
             this.AnchorSectionPatternText.Text = Settings.TabsManagerSettingsService.AnchorSectionPattern;
             this.AnchorSubsectionPatternText.Text = Settings.TabsManagerSettingsService.AnchorSubsectionPattern;
         }
@@ -140,6 +142,25 @@ namespace TabsManagerExtension.Controls {
             if (!this._isLoading) {
                 Settings.TabsManagerSettingsService.SetLoggingEnabled(this.LoggingEnabledCheckBox.IsChecked == true);
             }
+        }
+
+        private void OnLoggingSessionModeChanged(object sender, SelectionChangedEventArgs e) {
+            if (this._isLoading || this.LoggingSessionModeComboBox.SelectedValue is not string loggingSessionMode) {
+                return;
+            }
+
+            Settings.TabsManagerSettingsService.SetLoggingSessionMode(loggingSessionMode);
+            this.UpdateLoggingSessionModeRestartMessage();
+        }
+
+        private void UpdateLoggingSessionModeRestartMessage() {
+            bool modeChanged = this.LoggingSessionModeComboBox.SelectedValue is string loggingSessionMode &&
+                !string.Equals(
+                    loggingSessionMode,
+                    Settings.TabsManagerSettingsService.CurrentLoggingSessionMode,
+                    StringComparison.Ordinal
+                );
+            this.LoggingSessionModeRestartMessage.Visibility = modeChanged ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void OnAnchorPatternCommitted(object sender, KeyboardFocusChangedEventArgs e) {

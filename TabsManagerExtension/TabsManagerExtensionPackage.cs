@@ -105,7 +105,10 @@ namespace TabsManagerExtension {
                 "TabsManagerExtension"
             );
             string logFilePath = Path.Combine(logDirectory, "TabsManagerExtension.log");
-            Helpers.Diagnostic.Logger.EnableFileLogging(logFilePath);
+            Helpers.Diagnostic.Logger.EnableFileLogging(
+                logFilePath,
+                Settings.TabsManagerSettingsService.ShouldAppendLogSessions
+            );
             Helpers.Diagnostic.Logger.LogDebug($"[Package] File logging enabled: '{logFilePath}'.");
 
             //Console.Beep(1000, 500); // 1000 Гц, 500 мс

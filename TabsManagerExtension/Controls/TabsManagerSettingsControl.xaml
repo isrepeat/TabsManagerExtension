@@ -54,6 +54,24 @@
             <EventSetter Event="KeyDown"
                          Handler="OnEditorKeyDown" />
         </Style>
+        <Style x:Key="SettingsComboBoxStyle"
+               TargetType="ComboBox"
+               BasedOn="{StaticResource {x:Static vsshell:VsResourceKeys.ThemedDialogComboBoxStyleKey}}">
+            <Setter Property="Height"
+                    Value="28" />
+            <Setter Property="Margin"
+                    Value="0,4" />
+            <Setter Property="FontSize"
+                    Value="14" />
+            <Setter Property="Foreground"
+                    Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+        </Style>
+        <Style x:Key="SettingsComboBoxItemStyle"
+               TargetType="ComboBoxItem"
+               BasedOn="{StaticResource {x:Static vsshell:VsResourceKeys.ComboBoxItemStyleKey}}">
+            <Setter Property="FontSize"
+                    Value="14" />
+        </Style>
         <Style x:Key="FontOptionCheckBoxStyle"
                TargetType="CheckBox"
                BasedOn="{StaticResource {x:Static vsshell:VsResourceKeys.ThemedDialogCheckBoxStyleKey}}">
@@ -176,6 +194,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0"
                            Grid.ColumnSpan="2"
@@ -216,6 +236,29 @@
                           Style="{StaticResource FontOptionCheckBoxStyle}"
                           Checked="OnLoggingEnabledChanged"
                           Unchecked="OnLoggingEnabledChanged" />
+                <TextBlock Grid.Row="4"
+                           Style="{StaticResource SettingLabelStyle}"
+                           Text="Logging sessions" />
+                <ComboBox x:Name="LoggingSessionModeComboBox"
+                          Grid.Row="4"
+                          Grid.Column="1"
+                          Style="{StaticResource SettingsComboBoxStyle}"
+                          ItemContainerStyle="{StaticResource SettingsComboBoxItemStyle}"
+                          SelectedValuePath="Tag"
+                          SelectionChanged="OnLoggingSessionModeChanged">
+                    <ComboBoxItem Tag="AllSessions"
+                                  Content="AllSessions" />
+                    <ComboBoxItem Tag="LastSession"
+                                  Content="LastSession" />
+                </ComboBox>
+                <TextBlock x:Name="LoggingSessionModeRestartMessage"
+                           Grid.Row="5"
+                           Grid.Column="1"
+                           Margin="0,8,0,0"
+                           Foreground="#FFFFCC00"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed"
+                           Text="To apply this setting, restart Visual Studio. This reloads the Tabs Manager extension." />
             </Grid>
         </ScrollViewer>
         <!-- Шаблоны якорей редактируются как многострочные регулярные выражения. -->

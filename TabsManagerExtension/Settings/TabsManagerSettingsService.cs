@@ -24,6 +24,8 @@ namespace TabsManagerExtension.Settings {
 
         public const string DefaultAnchorSectionPattern = @"^\s*//\s*░(?!░)\s*(?<title>[^\r\n]+?)\s*\r?\n\s*//\s*░{3,}\s*(?=\r?\n|$)";
         public const string DefaultAnchorSubsectionPattern = @"^\s*//\s*░(?!░)\s*(?<title>[^\r\n]+?)\s*(?=\r?\n|$)";
+        public const string AllSessionsLoggingMode = "AllSessions";
+        public const string LastSessionLoggingMode = "LastSession";
 
 #if DEBUG
         private const string SettingsFileName = "settings.dbg.json";
@@ -44,6 +46,7 @@ namespace TabsManagerExtension.Settings {
         private static VisualStudioExtensibility? _extensibility;
         private static bool _isShuttingDown;
         private static bool _autoLoadCustomTabs = true;
+        private static string _currentLoggingSessionMode = LastSessionLoggingMode;
         private static double _tabsScaleFactor = 1.0;
         private static string _anchorSectionPattern = DefaultAnchorSectionPattern;
         private static string _anchorSubsectionPattern = DefaultAnchorSubsectionPattern;
@@ -125,6 +128,25 @@ namespace TabsManagerExtension.Settings {
             get {
                 lock (_sync) {
                     return Load().IsLoggingEnabled;
+                }
+            }
+        }
+
+        public static string LoggingSessionMode {
+            get {
+                lock (_sync) {
+                    return Load().LoggingSessionMode;
+                }
+            }
+        }
+
+        public static bool ShouldAppendLogSessions =>
+            string.Equals(LoggingSessionMode, AllSessionsLoggingMode, StringComparison.Ordinal);
+
+        public static string CurrentLoggingSessionMode {
+            get {
+                lock (_sync) {
+                    return _currentLoggingSessionMode;
                 }
             }
         }
@@ -394,6 +416,19 @@ namespace TabsManagerExtension.Settings {
             }
         }
 
+        public static void SetLoggingSessionMode(string? value) {
+            string normalizedValue = NormalizeLoggingSessionMode(value);
+            lock (_sync) {
+                var settings = Load();
+                if (string.Equals(settings.LoggingSessionMode, normalizedValue, StringComparison.Ordinal)) {
+                    return;
+                }
+
+                settings.LoggingSessionMode = normalizedValue;
+                Save(settings);
+            }
+        }
+
         public static void SetActiveSettingsSection(string section) {
             string normalizedSection = section == "customization" || section == "anchors" ? section : "main";
             lock (_sync) {
@@ -602,6 +637,8 @@ namespace TabsManagerExtension.Settings {
             var settings = Load();
             _autoLoadCustomTabs = settings.AutoLoadCustomTabs;
             Helpers.Diagnostic.Logger.IsLoggingEnabled = settings.IsLoggingEnabled;
+            settings.LoggingSessionMode = NormalizeLoggingSessionMode(settings.LoggingSessionMode);
+            _currentLoggingSessionMode = settings.LoggingSessionMode;
             _tabsScaleFactor = NormalizeTabsScaleFactor(settings.TabsScaleFactor);
             _anchorSectionPattern = NormalizeAnchorPattern(settings.AnchorSectionPattern, DefaultAnchorSectionPattern, "section");
             _anchorSubsectionPattern = NormalizeAnchorPattern(settings.AnchorSubsectionPattern, DefaultAnchorSubsectionPattern, "subsection");
@@ -661,6 +698,12 @@ namespace TabsManagerExtension.Settings {
             return double.IsNaN(value) || double.IsInfinity(value)
                 ? 1.0
                 : Helpers.Math.Clamp(value, 0.5, 1.5);
+        }
+
+        private static string NormalizeLoggingSessionMode(string? value) {
+            return string.Equals(value, AllSessionsLoggingMode, StringComparison.Ordinal)
+                ? AllSessionsLoggingMode
+                : LastSessionLoggingMode;
         }
 
         private static List<string> NormalizeToolWindowIds(IEnumerable<string>? windowIds) {
